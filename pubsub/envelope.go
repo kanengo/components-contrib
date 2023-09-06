@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+	"unsafe"
 
 	"github.com/google/uuid"
 
@@ -95,11 +96,11 @@ func NewCloudEventsEnvelope(id, source, eventType, subject string, topic string,
 		ceData = base64.StdEncoding.EncodeToString(data)
 		ceDataField = DataBase64Field
 	} else {
-		ceData = string(data)
+		ceData = *(*string)(unsafe.Pointer(&data))
 	}
 
 	if err != nil {
-		ceData = string(data)
+		ceData = *(*string)(unsafe.Pointer(&data))
 	}
 
 	ce := map[string]interface{}{
