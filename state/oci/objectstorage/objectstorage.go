@@ -16,6 +16,7 @@ package objectstorage
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -35,6 +36,7 @@ import (
 	"github.com/dapr/components-contrib/state"
 	stateutils "github.com/dapr/components-contrib/state/utils"
 	"github.com/dapr/kit/logger"
+	kitmd "github.com/dapr/kit/metadata"
 )
 
 const (
@@ -166,6 +168,10 @@ func (r *StateStore) Ping(ctx context.Context) error {
 	return r.pingBucket(ctx)
 }
 
+func (r *StateStore) Close() error {
+	return nil
+}
+
 func NewOCIObjectStorageStore(logger logger.Logger) state.Store {
 	s := &StateStore{
 		json: jsoniter.ConfigFastest,
@@ -201,7 +207,7 @@ func getConfigFilePath(configFilePath string) (value string, err error) {
 
 func getObjectStorageMetadata(meta map[string]string) (*objectStoreMetadata, error) {
 	m := objectStoreMetadata{}
-	errDecode := metadata.DecodeMetadata(meta, &m)
+	errDecode := kitmd.DecodeMetadata(meta, &m)
 	if errDecode != nil {
 		return nil, errDecode
 	}
@@ -251,11 +257,11 @@ func getIdentityAuthenticationDetails(meta objectStoreMetadata) (err error) {
 // functions that bridge from the Dapr State API to the OCI ObjectStorage Client.
 func (r *StateStore) writeDocument(ctx context.Context, req *state.SetRequest) error {
 	if len(req.Key) == 0 || req.Key == "" {
-		return fmt.Errorf("key for value to set was missing from request")
+		return errors.New("key for value to set was missing from request")
 	}
 	if req.Options.Concurrency == state.FirstWrite && (req.ETag == nil || len(*req.ETag) == 0) {
 		r.logger.Debugf("when FirstWrite is to be enforced, a value must be provided for the ETag")
-		return fmt.Errorf("when FirstWrite is to be enforced, a value must be provided for the ETag")
+		return errors.New("when FirstWrite is to be enforced, a value must be provided for the ETag")
 	}
 	metadata := (map[string]string{"category": daprStateStoreMetaLabel})
 
@@ -294,7 +300,7 @@ func (r *StateStore) convertTTLtoExpiryTime(req *state.SetRequest, metadata map[
 
 func (r *StateStore) readDocument(ctx context.Context, req *state.GetRequest) ([]byte, *string, error) {
 	if len(req.Key) == 0 || req.Key == "" {
-		return nil, nil, fmt.Errorf("key for value to get was missing from request")
+		return nil, nil, errors.New("key for value to get was missing from request")
 	}
 	objectName := getFileName(req.Key)
 	content, etag, meta, err := r.client.getObject(ctx, objectName)
@@ -326,7 +332,7 @@ func (r *StateStore) pingBucket(ctx context.Context) error {
 
 func (r *StateStore) deleteDocument(ctx context.Context, req *state.DeleteRequest) error {
 	if len(req.Key) == 0 || req.Key == "" {
-		return fmt.Errorf("key for value to delete was missing from request")
+		return errors.New("key for value to delete was missing from request")
 	}
 
 	objectName := getFileName(req.Key)
@@ -336,7 +342,7 @@ func (r *StateStore) deleteDocument(ctx context.Context, req *state.DeleteReques
 	}
 	if req.Options.Concurrency == state.FirstWrite && (etag == nil || len(*etag) == 0) {
 		r.logger.Debugf("when FirstWrite is to be enforced, a value must be provided for the ETag")
-		return fmt.Errorf("when FirstWrite is to be enforced, a value must be provided for the ETag")
+		return errors.New("when FirstWrite is to be enforced, a value must be provided for the ETag")
 	}
 	err := r.client.deleteObject(ctx, objectName, etag)
 	if err != nil {

@@ -38,7 +38,7 @@ func Test_parseTopicArn(t *testing.T) {
 }
 
 // Verify that all metadata ends up in the correct spot.
-func Test_getSnsSqsMetatdata_AllConfiguration(t *testing.T) {
+func Test_getSnsSqsMetadata_AllConfiguration(t *testing.T) {
 	t.Parallel()
 	r := require.New(t)
 	l := logger.NewLogger("SnsSqs unit test")
@@ -47,10 +47,11 @@ func Test_getSnsSqsMetatdata_AllConfiguration(t *testing.T) {
 		logger: l,
 	}
 
-	md, err := ps.getSnsSqsMetatdata(pubsub.Metadata{Base: metadata.Base{Properties: map[string]string{
+	md, err := ps.getSnsSqsMetadata(pubsub.Metadata{Base: metadata.Base{Properties: map[string]string{
 		"consumerID":               "consumer",
 		"Endpoint":                 "endpoint",
 		"concurrencyMode":          string(pubsub.Single),
+		"concurrencyLimit":         "42",
 		"accessKey":                "a",
 		"secretKey":                "s",
 		"sessionToken":             "t",
@@ -68,6 +69,7 @@ func Test_getSnsSqsMetatdata_AllConfiguration(t *testing.T) {
 	r.Equal("consumer", md.SqsQueueName)
 	r.Equal("endpoint", md.Endpoint)
 	r.Equal(pubsub.Single, md.ConcurrencyMode)
+	r.Equal(42, md.ConcurrencyLimit)
 	r.Equal("a", md.AccessKey)
 	r.Equal("s", md.SecretKey)
 	r.Equal("t", md.SessionToken)
@@ -80,7 +82,7 @@ func Test_getSnsSqsMetatdata_AllConfiguration(t *testing.T) {
 	r.Equal(int64(6), md.MessageReceiveLimit)
 }
 
-func Test_getSnsSqsMetatdata_defaults(t *testing.T) {
+func Test_getSnsSqsMetadata_defaults(t *testing.T) {
 	t.Parallel()
 	r := require.New(t)
 	l := logger.NewLogger("SnsSqs unit test")
@@ -89,7 +91,7 @@ func Test_getSnsSqsMetatdata_defaults(t *testing.T) {
 		logger: l,
 	}
 
-	md, err := ps.getSnsSqsMetatdata(pubsub.Metadata{Base: metadata.Base{Properties: map[string]string{
+	md, err := ps.getSnsSqsMetadata(pubsub.Metadata{Base: metadata.Base{Properties: map[string]string{
 		"consumerID": "c",
 		"accessKey":  "a",
 		"secretKey":  "s",
@@ -105,16 +107,17 @@ func Test_getSnsSqsMetatdata_defaults(t *testing.T) {
 	r.Equal("", md.SessionToken)
 	r.Equal("r", md.Region)
 	r.Equal(pubsub.Parallel, md.ConcurrencyMode)
+	r.Equal(0, md.ConcurrencyLimit)
 	r.Equal(int64(10), md.MessageVisibilityTimeout)
 	r.Equal(int64(10), md.MessageRetryLimit)
 	r.Equal(int64(2), md.MessageWaitTimeSeconds)
 	r.Equal(int64(10), md.MessageMaxNumber)
-	r.Equal(false, md.DisableEntityManagement)
-	r.Equal(float64(5), md.AssetsManagementTimeoutSeconds)
-	r.Equal(false, md.DisableDeleteOnRetryLimit)
+	r.False(md.DisableEntityManagement)
+	r.EqualValues(float64(5), md.AssetsManagementTimeoutSeconds)
+	r.False(md.DisableDeleteOnRetryLimit)
 }
 
-func Test_getSnsSqsMetatdata_legacyaliases(t *testing.T) {
+func Test_getSnsSqsMetadata_legacyaliases(t *testing.T) {
 	t.Parallel()
 	r := require.New(t)
 	l := logger.NewLogger("SnsSqs unit test")
@@ -123,7 +126,7 @@ func Test_getSnsSqsMetatdata_legacyaliases(t *testing.T) {
 		logger: l,
 	}
 
-	md, err := ps.getSnsSqsMetatdata(pubsub.Metadata{Base: metadata.Base{Properties: map[string]string{
+	md, err := ps.getSnsSqsMetadata(pubsub.Metadata{Base: metadata.Base{Properties: map[string]string{
 		"consumerID":   "consumer",
 		"awsAccountID": "acctId",
 		"awsSecret":    "secret",
@@ -151,13 +154,13 @@ func testMetadataParsingShouldFail(t *testing.T, metadata pubsub.Metadata, l log
 		logger: l,
 	}
 
-	md, err := ps.getSnsSqsMetatdata(metadata)
+	md, err := ps.getSnsSqsMetadata(metadata)
 
 	r.Error(err)
 	r.Nil(md)
 }
 
-func Test_getSnsSqsMetatdata_invalidMetadataSetup(t *testing.T) {
+func Test_getSnsSqsMetadata_invalidMetadataSetup(t *testing.T) {
 	t.Parallel()
 
 	fixtures := []testUnitFixture{
@@ -273,6 +276,20 @@ func Test_getSnsSqsMetatdata_invalidMetadataSetup(t *testing.T) {
 			}}},
 			name: "invalid message concurrencyMode",
 		},
+		// invalid concurrencyLimit
+		{
+			metadata: pubsub.Metadata{Base: metadata.Base{Properties: map[string]string{
+				"consumerID":        "consumer",
+				"Endpoint":          "endpoint",
+				"AccessKey":         "acctId",
+				"SecretKey":         "secret",
+				"awsToken":          "token",
+				"Region":            "region",
+				"messageRetryLimit": "10",
+				"concurrencyLimit":  "-1",
+			}}},
+			name: "invalid message concurrencyLimit",
+		},
 	}
 
 	l := logger.NewLogger("SnsSqs unit test")
@@ -293,7 +310,7 @@ func Test_replaceNameToAWSSanitizedName(t *testing.T) {
 		name // for an AWS resource &*()*&&^Some invalid name // for an AWS resource &*()*&&^Some invalid name // for an
 		AWS resource &*()*&&^Some invalid name // for an AWS resource &*()*&&^`
 	v := nameToAWSSanitizedName(s, false)
-	r.Equal(80, len(v))
+	r.Len(v, 80)
 	r.Equal("Some_invalid-nameforanAWSresourceSomeinvalidnameforanAWSresourceSomeinvalidnamef", v)
 }
 
@@ -305,7 +322,7 @@ func Test_replaceNameToAWSSanitizedFifoName_Trimmed(t *testing.T) {
 		name // for an AWS resource &*()*&&^Some invalid name // for an AWS resource &*()*&&^Some invalid name // for an
 		AWS resource &*()*&&^Some invalid name // for an AWS resource &*()*&&^`
 	v := nameToAWSSanitizedName(s, true)
-	r.Equal(80, len(v))
+	r.Len(v, 80)
 	r.Equal("Some_invalid-nameforanAWSresourceSomeinvalidnameforanAWSresourceSomeinvalid.fifo", v)
 }
 
@@ -315,7 +332,7 @@ func Test_replaceNameToAWSSanitizedFifoName_NonTrimmed(t *testing.T) {
 
 	s := `012345678901234567890123456789012345678901234567890123456789012345678901234`
 	v := nameToAWSSanitizedName(s, true)
-	r.Equal(80, len(v))
+	r.Len(v, 80)
 	r.Equal("012345678901234567890123456789012345678901234567890123456789012345678901234.fifo", v)
 }
 
@@ -325,7 +342,7 @@ func Test_replaceNameToAWSSanitizedExistingFifoName_NonTrimmed(t *testing.T) {
 
 	s := `012345678901234567890123456789012345678901234567890123456789012345678901234.fifo`
 	v := nameToAWSSanitizedName(s, true)
-	r.Equal(80, len(v))
+	r.Len(v, 80)
 	r.Equal("012345678901234567890123456789012345678901234567890123456789012345678901234.fifo", v)
 }
 
@@ -335,7 +352,7 @@ func Test_replaceNameToAWSSanitizedExistingFifoName_NonMax(t *testing.T) {
 
 	s := `0123456789`
 	v := nameToAWSSanitizedName(s, true)
-	r.Equal(len(s)+len(".fifo"), len(v))
+	r.Len(v, len(s)+len(".fifo"))
 	r.Equal("0123456789.fifo", v)
 }
 
@@ -345,7 +362,7 @@ func Test_replaceNameToAWSSanitizedExistingFifoName_NoFifoSetting(t *testing.T) 
 
 	s := `012345678901234567890123456789012345678901234567890123456789012345678901234.fifo`
 	v := nameToAWSSanitizedName(s, false)
-	r.Equal(79, len(v))
+	r.Len(v, 79)
 	r.Equal("012345678901234567890123456789012345678901234567890123456789012345678901234fifo", v)
 }
 
@@ -355,7 +372,7 @@ func Test_replaceNameToAWSSanitizedExistingFifoName_Trimmed(t *testing.T) {
 
 	s := `01234567890123456789012345678901234567890123456789012345678901234567890123456789.fifo`
 	v := nameToAWSSanitizedName(s, true)
-	r.Equal(80, len(v))
+	r.Len(v, 80)
 	r.Equal("012345678901234567890123456789012345678901234567890123456789012345678901234.fifo", v)
 }
 
@@ -371,7 +388,7 @@ func Test_tryInsertCondition(t *testing.T) {
 		policy.tryInsertCondition(sqsArn, snsArn)
 	}
 
-	r.Equal(len(policy.Statement), 4)
+	r.Len(policy.Statement, 4)
 	insertedStatement := policy.Statement[0]
 	r.Equal(insertedStatement.Resource, sqsArn)
 	r.Equal(insertedStatement.Condition.ValueArnEquals.AwsSourceArn, snsArns[0])
@@ -414,10 +431,10 @@ func Test_policy_compatible(t *testing.T) {
 `
 	policy := &policy{Version: "2012-10-17"}
 	err := json.Unmarshal([]byte(oldPolicy), policy)
-	r.Equal(err, nil)
+	r.NoError(err)
 
 	policy.tryInsertCondition(sqsArn, snsArn)
-	r.Equal(len(policy.Statement), 1)
+	r.Len(policy.Statement, 1)
 	insertedStatement := policy.Statement[0]
 	r.Equal(insertedStatement.Resource, sqsArn)
 	r.Equal(insertedStatement.Condition.ValueArnEquals.AwsSourceArn, snsArn)
@@ -432,7 +449,7 @@ func Test_buildARN_DefaultPartition(t *testing.T) {
 		logger: l,
 	}
 
-	md, err := ps.getSnsSqsMetatdata(pubsub.Metadata{Base: metadata.Base{Properties: map[string]string{
+	md, err := ps.getSnsSqsMetadata(pubsub.Metadata{Base: metadata.Base{Properties: map[string]string{
 		"consumerID": "c",
 		"accessKey":  "a",
 		"secretKey":  "s",
@@ -455,7 +472,7 @@ func Test_buildARN_StandardPartition(t *testing.T) {
 		logger: l,
 	}
 
-	md, err := ps.getSnsSqsMetatdata(pubsub.Metadata{Base: metadata.Base{Properties: map[string]string{
+	md, err := ps.getSnsSqsMetadata(pubsub.Metadata{Base: metadata.Base{Properties: map[string]string{
 		"consumerID": "c",
 		"accessKey":  "a",
 		"secretKey":  "s",
@@ -478,7 +495,7 @@ func Test_buildARN_NonStandardPartition(t *testing.T) {
 		logger: l,
 	}
 
-	md, err := ps.getSnsSqsMetatdata(pubsub.Metadata{Base: metadata.Base{Properties: map[string]string{
+	md, err := ps.getSnsSqsMetadata(pubsub.Metadata{Base: metadata.Base{Properties: map[string]string{
 		"consumerID": "c",
 		"accessKey":  "a",
 		"secretKey":  "s",

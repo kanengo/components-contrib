@@ -15,14 +15,16 @@ package redis
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	rediscomponent "github.com/dapr/components-contrib/internal/component/redis"
+	rediscomponent "github.com/dapr/components-contrib/common/component/redis"
 	contribMetadata "github.com/dapr/components-contrib/metadata"
 	"github.com/dapr/components-contrib/pubsub"
 	"github.com/dapr/kit/logger"
@@ -74,7 +76,7 @@ func NewRedisStreams(logger logger.Logger) pubsub.PubSub {
 
 func (r *redisStreams) Init(ctx context.Context, metadata pubsub.Metadata) error {
 	var err error
-	r.client, r.clientSettings, err = rediscomponent.ParseClientFromProperties(metadata.Properties, contribMetadata.PubSubType)
+	r.client, r.clientSettings, err = rediscomponent.ParseClientFromProperties(metadata.Properties, contribMetadata.PubSubType, ctx, &r.logger)
 	if err != nil {
 		return err
 	}
@@ -82,9 +84,9 @@ func (r *redisStreams) Init(ctx context.Context, metadata pubsub.Metadata) error
 	if _, err = r.client.PingResult(ctx); err != nil {
 		return fmt.Errorf("redis streams: error connecting to redis at %s: %s", r.clientSettings.Host, err)
 	}
-	r.queue = make(chan redisMessageWrapper, int(r.clientSettings.QueueDepth))
+	r.queue = make(chan redisMessageWrapper, int(r.clientSettings.QueueDepth)) //nolint:gosec
 
-	for i := uint(0); i < r.clientSettings.Concurrency; i++ {
+	for range r.clientSettings.Concurrency {
 		r.wg.Add(1)
 		go func() {
 			defer r.wg.Done()
@@ -100,11 +102,31 @@ func (r *redisStreams) Publish(ctx context.Context, req *pubsub.PublishRequest) 
 		return errors.New("component is closed")
 	}
 
-	_, err := r.client.XAdd(ctx, req.Topic, r.clientSettings.MaxLenApprox, map[string]interface{}{"data": req.Data})
+	redisPayload := map[string]interface{}{"data": req.Data}
+
+	if req.Metadata != nil {
+		serializedMetadata, err := json.Marshal(req.Metadata)
+		if err != nil {
+			return err
+		}
+		redisPayload["metadata"] = serializedMetadata
+	}
+
+	_, err := r.client.XAdd(ctx, req.Topic, r.clientSettings.MaxLenApprox, redisPayload)
 	if err != nil {
 		return fmt.Errorf("redis streams: error from publish: %s", err)
 	}
 
+	return nil
+}
+
+func (r *redisStreams) CreateConsumerGroup(ctx context.Context, stream string) error {
+	err := r.client.XGroupCreateMkStream(ctx, stream, r.clientSettings.ConsumerID, "0")
+	// Ignore BUSYGROUP errors
+	if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
+		r.logger.Errorf("redis streams: %s", err)
+		return err
+	}
 	return nil
 }
 
@@ -113,10 +135,7 @@ func (r *redisStreams) Subscribe(ctx context.Context, req pubsub.SubscribeReques
 		return errors.New("component is closed")
 	}
 
-	err := r.client.XGroupCreateMkStream(ctx, req.Topic, r.clientSettings.ConsumerID, "0")
-	// Ignore BUSYGROUP errors
-	if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
-		r.logger.Errorf("redis streams: %s", err)
+	if err := r.CreateConsumerGroup(ctx, req.Topic); err != nil {
 		return err
 	}
 
@@ -149,7 +168,7 @@ func (r *redisStreams) Subscribe(ctx context.Context, req pubsub.SubscribeReques
 // pick them up for processing.
 func (r *redisStreams) enqueueMessages(ctx context.Context, stream string, handler pubsub.Handler, msgs []rediscomponent.RedisXMessage) {
 	for _, msg := range msgs {
-		rmsg := createRedisMessageWrapper(ctx, stream, handler, msg)
+		rmsg := r.createRedisMessageWrapper(ctx, stream, handler, msg)
 
 		select {
 		// Might block if the queue is full so we need the ctx.Done below.
@@ -164,7 +183,7 @@ func (r *redisStreams) enqueueMessages(ctx context.Context, stream string, handl
 
 // createRedisMessageWrapper encapsulates the Redis message, message identifier, and handler
 // in `redisMessage` for processing.
-func createRedisMessageWrapper(ctx context.Context, stream string, handler pubsub.Handler, msg rediscomponent.RedisXMessage) redisMessageWrapper {
+func (r *redisStreams) createRedisMessageWrapper(ctx context.Context, stream string, handler pubsub.Handler, msg rediscomponent.RedisXMessage) redisMessageWrapper {
 	var data []byte
 	if dataValue, exists := msg.Values["data"]; exists && dataValue != nil {
 		switch v := dataValue.(type) {
@@ -175,11 +194,21 @@ func createRedisMessageWrapper(ctx context.Context, stream string, handler pubsu
 		}
 	}
 
+	var metadata map[string]string
+	if metadataValue, exists := msg.Values["metadata"]; exists && metadataValue != nil {
+		metadataStr := metadataValue.(string)
+		err := json.Unmarshal([]byte(metadataStr), &metadata)
+		if err != nil {
+			r.logger.Warnf("Redis PubSub: Could not extract metadata for Redis message %s: %v", msg.ID, err)
+		}
+	}
+
 	return redisMessageWrapper{
 		ctx: ctx,
 		message: pubsub.NewMessage{
-			Topic: stream,
-			Data:  data,
+			Topic:    stream,
+			Data:     data,
+			Metadata: metadata,
 		},
 		messageID: msg.ID,
 		handler:   handler,
@@ -239,9 +268,15 @@ func (r *redisStreams) pollNewMessagesLoop(ctx context.Context, stream string, h
 		}
 
 		// Read messages
+		//nolint:gosec
 		streams, err := r.client.XReadGroupResult(ctx, r.clientSettings.ConsumerID, r.clientSettings.ConsumerID, []string{stream, ">"}, int64(r.clientSettings.QueueDepth), time.Duration(r.clientSettings.ReadTimeout))
 		if err != nil {
 			if !errors.Is(err, r.client.GetNilValueError()) && err != context.Canceled {
+				if strings.Contains(err.Error(), "NOGROUP") {
+					r.logger.Warnf("redis streams: consumer group %s does not exist for stream %s. This could mean the server experienced data loss, or the group/stream was deleted.", r.clientSettings.ConsumerID, stream)
+					r.logger.Warnf("redis streams: recreating group %s for stream %s", r.clientSettings.ConsumerID, stream)
+					r.CreateConsumerGroup(ctx, stream)
+				}
 				r.logger.Errorf("redis streams: error reading from stream %s: %s", stream, err)
 			}
 			continue
@@ -289,7 +324,7 @@ func (r *redisStreams) reclaimPendingMessages(ctx context.Context, stream string
 			r.clientSettings.ConsumerID,
 			"-",
 			"+",
-			int64(r.clientSettings.QueueDepth),
+			int64(r.clientSettings.QueueDepth), //nolint:gosec
 		)
 		if err != nil && !errors.Is(err, r.client.GetNilValueError()) {
 			r.logger.Errorf("error retrieving pending Redis messages: %v", err)

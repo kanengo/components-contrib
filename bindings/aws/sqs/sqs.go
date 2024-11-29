@@ -25,20 +25,20 @@ import (
 	"github.com/aws/aws-sdk-go/service/sqs"
 
 	"github.com/dapr/components-contrib/bindings"
-	awsAuth "github.com/dapr/components-contrib/internal/authentication/aws"
+	awsAuth "github.com/dapr/components-contrib/common/authentication/aws"
 	"github.com/dapr/components-contrib/metadata"
 	"github.com/dapr/kit/logger"
+	kitmd "github.com/dapr/kit/metadata"
 )
 
 // AWSSQS allows receiving and sending data to/from AWS SQS.
 type AWSSQS struct {
-	Client   *sqs.SQS
-	QueueURL *string
-
-	logger  logger.Logger
-	wg      sync.WaitGroup
-	closeCh chan struct{}
-	closed  atomic.Bool
+	authProvider awsAuth.Provider
+	queueName    string
+	logger       logger.Logger
+	wg           sync.WaitGroup
+	closeCh      chan struct{}
+	closed       atomic.Bool
 }
 
 type sqsMetadata struct {
@@ -65,21 +65,22 @@ func (a *AWSSQS) Init(ctx context.Context, metadata bindings.Metadata) error {
 		return err
 	}
 
-	client, err := a.getClient(m)
+	opts := awsAuth.Options{
+		Logger:       a.logger,
+		Properties:   metadata.Properties,
+		Region:       m.Region,
+		Endpoint:     m.Endpoint,
+		AccessKey:    m.AccessKey,
+		SecretKey:    m.SecretKey,
+		SessionToken: m.SessionToken,
+	}
+	// extra configs needed per component type
+	provider, err := awsAuth.NewProvider(ctx, opts, awsAuth.GetConfig(opts))
 	if err != nil {
 		return err
 	}
-
-	queueName := m.QueueName
-	resultURL, err := client.GetQueueUrlWithContext(ctx, &sqs.GetQueueUrlInput{
-		QueueName: aws.String(queueName),
-	})
-	if err != nil {
-		return err
-	}
-
-	a.QueueURL = resultURL.QueueUrl
-	a.Client = client
+	a.authProvider = provider
+	a.queueName = m.QueueName
 
 	return nil
 }
@@ -90,9 +91,14 @@ func (a *AWSSQS) Operations() []bindings.OperationKind {
 
 func (a *AWSSQS) Invoke(ctx context.Context, req *bindings.InvokeRequest) (*bindings.InvokeResponse, error) {
 	msgBody := string(req.Data)
-	_, err := a.Client.SendMessageWithContext(ctx, &sqs.SendMessageInput{
+	url, err := a.authProvider.Sqs().QueueURL(ctx, a.queueName)
+	if err != nil {
+		a.logger.Errorf("failed to get queue url: %v", err)
+	}
+
+	_, err = a.authProvider.Sqs().Sqs.SendMessageWithContext(ctx, &sqs.SendMessageInput{
 		MessageBody: &msgBody,
-		QueueUrl:    a.QueueURL,
+		QueueUrl:    url,
 	})
 
 	return nil, err
@@ -112,9 +118,13 @@ func (a *AWSSQS) Read(ctx context.Context, handler bindings.Handler) error {
 			if ctx.Err() != nil || a.closed.Load() {
 				return
 			}
+			url, err := a.authProvider.Sqs().QueueURL(ctx, a.queueName)
+			if err != nil {
+				a.logger.Errorf("failed to get queue url: %v", err)
+			}
 
-			result, err := a.Client.ReceiveMessageWithContext(ctx, &sqs.ReceiveMessageInput{
-				QueueUrl: a.QueueURL,
+			result, err := a.authProvider.Sqs().Sqs.ReceiveMessageWithContext(ctx, &sqs.ReceiveMessageInput{
+				QueueUrl: url,
 				AttributeNames: aws.StringSlice([]string{
 					"SentTimestamp",
 				}),
@@ -125,7 +135,7 @@ func (a *AWSSQS) Read(ctx context.Context, handler bindings.Handler) error {
 				WaitTimeSeconds: aws.Int64(20),
 			})
 			if err != nil {
-				a.logger.Errorf("Unable to receive message from queue %q, %v.", *a.QueueURL, err)
+				a.logger.Errorf("Unable to receive message from queue %q, %v.", url, err)
 			}
 
 			if len(result.Messages) > 0 {
@@ -139,8 +149,8 @@ func (a *AWSSQS) Read(ctx context.Context, handler bindings.Handler) error {
 						msgHandle := m.ReceiptHandle
 
 						// Use a background context here because ctx may be canceled already
-						a.Client.DeleteMessageWithContext(context.Background(), &sqs.DeleteMessageInput{
-							QueueUrl:      a.QueueURL,
+						a.authProvider.Sqs().Sqs.DeleteMessageWithContext(context.Background(), &sqs.DeleteMessageInput{
+							QueueUrl:      url,
 							ReceiptHandle: msgHandle,
 						})
 					}
@@ -163,27 +173,20 @@ func (a *AWSSQS) Close() error {
 		close(a.closeCh)
 	}
 	a.wg.Wait()
+	if a.authProvider != nil {
+		return a.authProvider.Close()
+	}
 	return nil
 }
 
 func (a *AWSSQS) parseSQSMetadata(meta bindings.Metadata) (*sqsMetadata, error) {
 	m := sqsMetadata{}
-	err := metadata.DecodeMetadata(meta.Properties, &m)
+	err := kitmd.DecodeMetadata(meta.Properties, &m)
 	if err != nil {
 		return nil, err
 	}
 
 	return &m, nil
-}
-
-func (a *AWSSQS) getClient(metadata *sqsMetadata) (*sqs.SQS, error) {
-	sess, err := awsAuth.GetClient(metadata.AccessKey, metadata.SecretKey, metadata.SessionToken, metadata.Region, metadata.Endpoint)
-	if err != nil {
-		return nil, err
-	}
-	c := sqs.New(sess)
-
-	return c, nil
 }
 
 // GetComponentMetadata returns the metadata of the component.

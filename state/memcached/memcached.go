@@ -29,6 +29,7 @@ import (
 	"github.com/dapr/components-contrib/state"
 	"github.com/dapr/components-contrib/state/utils"
 	"github.com/dapr/kit/logger"
+	kitmd "github.com/dapr/kit/metadata"
 )
 
 const (
@@ -104,7 +105,7 @@ func getMemcachedMetadata(meta state.Metadata) (*memcachedMetadata, error) {
 		Timeout:            -1,
 	}
 
-	err := metadata.DecodeMetadata(meta.Properties, &m)
+	err := kitmd.DecodeMetadata(meta.Properties, &m)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +117,7 @@ func getMemcachedMetadata(meta state.Metadata) (*memcachedMetadata, error) {
 	if val, ok := meta.Properties[maxIdleConnections]; ok && val != "" {
 		p, err := strconv.Atoi(val)
 		if err != nil {
-			return nil, fmt.Errorf("error parsing maxIdleConnections")
+			return nil, errors.New("error parsing maxIdleConnections")
 		}
 		m.MaxIdleConnections = p
 	}
@@ -124,7 +125,7 @@ func getMemcachedMetadata(meta state.Metadata) (*memcachedMetadata, error) {
 	if val, ok := meta.Properties[timeout]; ok && val != "" {
 		p, err := strconv.Atoi(val)
 		if err != nil {
-			return nil, fmt.Errorf("error parsing timeout")
+			return nil, errors.New("error parsing timeout")
 		}
 		m.Timeout = p
 	}
@@ -144,7 +145,7 @@ func (m *Memcached) parseTTL(req *state.SetRequest) (*int32, error) {
 		// If ttl is more than 30 days, convert it to unix timestamp.
 		// https://github.com/memcached/memcached/wiki/Commands#standard-protocol
 		if parsedInt >= 60*60*24*30 {
-			parsedInt = int32(m.clock.Now().Unix()) + parsedInt
+			parsedInt = int32(m.clock.Now().Unix()) + parsedInt //nolint:gosec
 		}
 
 		// Notice that for Dapr, -1 means "persist with no TTL".

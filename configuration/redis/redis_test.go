@@ -21,8 +21,9 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
-	redisComponent "github.com/dapr/components-contrib/internal/component/redis"
+	redisComponent "github.com/dapr/components-contrib/common/component/redis"
 	contribMetadata "github.com/dapr/components-contrib/metadata"
 
 	"github.com/dapr/components-contrib/configuration"
@@ -32,8 +33,8 @@ import (
 func TestConfigurationStore_Get(t *testing.T) {
 	s, c := setupMiniredis()
 	defer s.Close()
-	assert.Nil(t, s.Set("testKey", "testValue"))
-	assert.Nil(t, s.Set("testKey2", "testValue2"))
+	require.NoError(t, s.Set("testKey", "testValue"))
+	require.NoError(t, s.Set("testKey2", "testValue2"))
 	type fields struct {
 		client redisComponent.RedisClient
 
@@ -301,7 +302,9 @@ func Test_parseRedisMetadata(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, got, err := redisComponent.ParseClientFromProperties(tt.args.meta.Properties, contribMetadata.ConfigurationStoreType)
+			ctx := context.Background()
+			log := logger.NewLogger("dapr.components")
+			_, got, err := redisComponent.ParseClientFromProperties(tt.args.meta.Properties, contribMetadata.ConfigurationStoreType, ctx, &log)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("edisComponent.ParseClientFromProperties error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -320,6 +323,8 @@ func Test_parseRedisMetadata(t *testing.T) {
 }
 
 func setupMiniredis() (*miniredis.Miniredis, redisComponent.RedisClient) {
+	ctx := context.Background()
+	log := logger.NewLogger("dapr.components")
 	s, err := miniredis.Run()
 	if err != nil {
 		panic(err)
@@ -328,7 +333,7 @@ func setupMiniredis() (*miniredis.Miniredis, redisComponent.RedisClient) {
 		"redisHost": s.Addr(),
 		"redisDB":   "0",
 	}
-	redisClient, _, _ := redisComponent.ParseClientFromProperties(props, contribMetadata.ConfigurationStoreType)
+	redisClient, _, _ := redisComponent.ParseClientFromProperties(props, contribMetadata.ConfigurationStoreType, ctx, &log)
 
 	return s, redisClient
 }

@@ -25,6 +25,7 @@ import (
 	"github.com/dapr/components-contrib/bindings"
 	"github.com/dapr/components-contrib/metadata"
 	"github.com/dapr/kit/logger"
+	kitmd "github.com/dapr/kit/metadata"
 )
 
 // Postmark allows sending of emails using the 3rd party Postmark service.
@@ -53,7 +54,7 @@ func NewPostmark(logger logger.Logger) bindings.OutputBinding {
 func (p *Postmark) parseMetadata(meta bindings.Metadata) (postmarkMetadata, error) {
 	pMeta := postmarkMetadata{}
 
-	err := metadata.DecodeMetadata(meta.Properties, &pMeta)
+	err := kitmd.DecodeMetadata(meta.Properties, &pMeta)
 	if err != nil {
 		return pMeta, err
 	}
@@ -103,7 +104,7 @@ func (p *Postmark) Invoke(ctx context.Context, req *bindings.InvokeRequest) (*bi
 		email.From = req.Metadata["emailFrom"]
 	}
 	if len(email.From) == 0 {
-		return nil, fmt.Errorf("error Postmark from email not supplied")
+		return nil, errors.New("error Postmark from email not supplied")
 	}
 
 	// Build email to address, this is required
@@ -114,7 +115,7 @@ func (p *Postmark) Invoke(ctx context.Context, req *bindings.InvokeRequest) (*bi
 		email.To = req.Metadata["emailTo"]
 	}
 	if len(email.To) == 0 {
-		return nil, fmt.Errorf("error Postmark to email not supplied")
+		return nil, errors.New("error Postmark to email not supplied")
 	}
 
 	// Build email subject, this is required
@@ -125,7 +126,7 @@ func (p *Postmark) Invoke(ctx context.Context, req *bindings.InvokeRequest) (*bi
 		email.Subject = req.Metadata["subject"]
 	}
 	if len(email.Subject) == 0 {
-		return nil, fmt.Errorf("error Postmark subject not supplied")
+		return nil, errors.New("error Postmark subject not supplied")
 	}
 
 	// Build email cc address, this is optional
@@ -165,4 +166,8 @@ func (p *Postmark) GetComponentMetadata() (metadataInfo metadata.MetadataMap) {
 	metadataStruct := postmarkMetadata{}
 	metadata.GetMetadataInfoFromStructType(reflect.TypeOf(metadataStruct), &metadataInfo, metadata.BindingType)
 	return
+}
+
+func (p *Postmark) Close() error {
+	return nil
 }

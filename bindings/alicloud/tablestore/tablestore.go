@@ -27,6 +27,7 @@ import (
 	"github.com/dapr/components-contrib/bindings"
 	contribMetadata "github.com/dapr/components-contrib/metadata"
 	"github.com/dapr/kit/logger"
+	kitmd "github.com/dapr/kit/metadata"
 )
 
 const (
@@ -123,7 +124,7 @@ func (s *AliCloudTableStore) Operations() []bindings.OperationKind {
 
 func (s *AliCloudTableStore) parseMetadata(metadata bindings.Metadata) (*tablestoreMetadata, error) {
 	m := tablestoreMetadata{}
-	err := contribMetadata.DecodeMetadata(metadata.Properties, &m)
+	err := kitmd.DecodeMetadata(metadata.Properties, &m)
 	if err != nil {
 		return nil, err
 	}
@@ -270,7 +271,6 @@ func (s *AliCloudTableStore) create(req *bindings.InvokeRequest, resp *bindings.
 	}
 
 	_, err = s.client.PutRow(putRequest)
-
 	if err != nil {
 		return err
 	}
@@ -301,7 +301,6 @@ func (s *AliCloudTableStore) delete(req *bindings.InvokeRequest, resp *bindings.
 	change.SetCondition(tablestore.RowExistenceExpectation_IGNORE) //nolint:nosnakecase
 	deleteReq := &tablestore.DeleteRowRequest{DeleteRowChange: change}
 	_, err = s.client.DeleteRow(deleteReq)
-
 	if err != nil {
 		return err
 	}
@@ -351,4 +350,8 @@ func (s *AliCloudTableStore) GetComponentMetadata() (metadataInfo contribMetadat
 	metadataStruct := tablestoreMetadata{}
 	contribMetadata.GetMetadataInfoFromStructType(reflect.TypeOf(metadataStruct), &metadataInfo, contribMetadata.BindingType)
 	return
+}
+
+func (s *AliCloudTableStore) Close() error {
+	return nil
 }

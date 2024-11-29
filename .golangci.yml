@@ -15,6 +15,7 @@ run:
   # list of build tags, all linters use it. Default is empty list.
   build-tags:
     - certtests
+    - conftests
     - metadata
 
   # which dirs to skip: they won't be analyzed;
@@ -22,7 +23,7 @@ run:
   # default value is empty list, but next dirs are always skipped independently
   # from this option's value:
   #   	vendor$, third_party$, testdata$, examples$, Godeps$, builtin$
-  skip-dirs:
+  issues.exclude-dirs:
     - ^vendor$
 
   # which files to skip: they will be analyzed, but issues from them
@@ -36,7 +37,7 @@ run:
 # output configuration options
 output:
   # colored-line-number|line-number|json|tab|checkstyle, default is "colored-line-number"
-  format: tab
+  formats: tab
 
   # print lines of code with issue, default is true
   print-issued-lines: true
@@ -70,9 +71,6 @@ linters-settings:
     statements: 40
 
   govet:
-    # report about shadowed variables
-    check-shadowing: true
-
     # settings per analyzer
     settings:
       printf: # analyzer name, run `go tool vet help` to see all analyzers
@@ -85,6 +83,7 @@ linters-settings:
     # enable or disable analyzers by name
     enable:
       - atomicalign
+      - shadow
     enable-all: false
     disable:
       - shadow
@@ -105,9 +104,6 @@ linters-settings:
   gocognit:
     # minimal code complexity to report, 30 by default (but we recommend 10-20)
     min-complexity: 10
-  maligned:
-    # print struct with more effective memory layout or not, false by default
-    suggest-new: true
   dupl:
     # tokens count to trigger issue, 150 by default
     threshold: 100
@@ -117,33 +113,59 @@ linters-settings:
     # minimal occurrences count to trigger, 3 by default
     min-occurrences: 5
   depguard:
-    list-type: denylist
-    include-go-root: false
-    packages-with-error-message:
-      - "go.uber.org/atomic": "must use sync/atomic"
-      - "golang.org/x/net/context": "must use context"
-      - "github.com/pkg/errors": "must use standard library (errors package and/or fmt.Errorf)"
-      - "github.com/Sirupsen/logrus": "must use github.com/dapr/kit/logger"
-      - "github.com/labstack/gommon/log": "must use github.com/dapr/kit/logger"
-      - "github.com/gobuffalo/logger": "must use github.com/dapr/kit/logger"
-      - "github.com/agrea/ptr": "must use github.com/dapr/kit/ptr"
-      - "github.com/cenkalti/backoff$": "must use github.com/cenkalti/backoff/v4"
-      - "github.com/cenkalti/backoff/v2": "must use github.com/cenkalti/backoff/v4"
-      - "github.com/cenkalti/backoff/v3": "must use github.com/cenkalti/backoff/v4"
-      - "github.com/dgrijalva/jwt-go": "must use github.com/lestrrat-go/jwx/v2"
-      - "github.com/golang-jwt/jwt$": "must use github.com/lestrrat-go/jwx/v2"
-      - "github.com/golang-jwt/jwt/v4": "must use github.com/lestrrat-go/jwx/v2"
-      - "github.com/lestrrat-go/jwx/jwa": "must use github.com/lestrrat-go/jwx/v2"
-      - "github.com/lestrrat-go/jwx/jwt": "must use github.com/lestrrat-go/jwx/v2"
-      - "github.com/lestrrat-go/jwx/jws": "must use github.com/lestrrat-go/jwx/v2"
-      - "github.com/gogo/status": "must use google.golang.org/grpc/status"
-      - "github.com/gogo/protobuf": "must use google.golang.org/protobuf"
-      - "k8s.io/utils/pointer": "must use github.com/dapr/kit/ptr"
-      - "k8s.io/utils/ptr": "must use github.com/dapr/kit/ptr"
-      - "github.com/ghodss/yaml": "must use sigs.k8s.io/yaml"
-      - "gopkg.in/yaml.v2": "must use gopkg.in/yaml.v3"
-      - "github.com/go-chi/chi$": "must use github.com/go-chi/chi/v5"
-      - "github.com/benbjohnson/clock": "must use k8s.io/utils/clock"
+    rules:
+      main:
+        deny:
+          - pkg: "github.com/golang-jwt/jwt/v5"
+            desc: "must use github.com/lestrrat-go/jwx/v2/jwt"
+          - pkg: "github.com/golang-jwt/jwt/v4"
+            desc: "must use github.com/lestrrat-go/jwx/v2/jwt"
+          - pkg: "github.com/Sirupsen/logrus"
+            desc: "must use github.com/dapr/kit/logger"
+          - pkg: "github.com/agrea/ptr"
+            desc: "must use github.com/dapr/kit/ptr"
+          - pkg: "go.uber.org/atomic"
+            desc: "must use sync/atomic"
+          - pkg: "golang.org/x/net/context"
+            desc: "must use context"
+          - pkg: "github.com/pkg/errors"
+            desc: "must use standard library (errors package and/or fmt.Errorf)"
+          - pkg: "golang.org/x/exp/slices"
+            desc: "must use slices from standard library"
+          - pkg: "github.com/go-chi/chi$"
+            desc: "must use github.com/go-chi/chi/v5"
+          - pkg: "github.com/cenkalti/backoff$"
+            desc: "must use github.com/cenkalti/backoff/v4"
+          - pkg: "github.com/cenkalti/backoff/v2"
+            desc: "must use github.com/cenkalti/backoff/v4"
+          - pkg: "github.com/cenkalti/backoff/v3"
+            desc: "must use github.com/cenkalti/backoff/v4"
+          - pkg: "github.com/benbjohnson/clock"
+            desc: "must use k8s.io/utils/clock"
+          - pkg: "github.com/ghodss/yaml"
+            desc: "must use sigs.k8s.io/yaml"
+          - pkg: "gopkg.in/yaml.v2"
+            desc: "must use gopkg.in/yaml.v3"
+          - pkg: "github.com/golang-jwt/jwt"
+            desc: "must use github.com/lestrrat-go/jwx/v2"
+          - pkg: "github.com/golang-jwt/jwt/v2"
+            desc: "must use github.com/lestrrat-go/jwx/v2"
+          - pkg: "github.com/golang-jwt/jwt/v3"
+            desc: "must use github.com/lestrrat-go/jwx/v2"
+          - pkg: "github.com/golang-jwt/jwt/v4"
+            desc: "must use github.com/lestrrat-go/jwx/v2"
+          - pkg: "github.com/gogo/status"
+            desc: "must use google.golang.org/grpc/status"
+          - pkg: "github.com/gogo/protobuf"
+            desc: "must use google.golang.org/protobuf"
+          - pkg: "github.com/lestrrat-go/jwx/jwa"
+            desc: "must use github.com/lestrrat-go/jwx/v2"
+          - pkg: "github.com/lestrrat-go/jwx/jwt"
+            desc: "must use github.com/lestrrat-go/jwx/v2"
+          - pkg: "github.com/labstack/gommon/log"
+            desc: "must use github.com/dapr/kit/logger"
+          - pkg: "github.com/gobuffalo/logger"
+            desc: "must use github.com/dapr/kit/logger"
   misspell:
     # Correct spellings using locale preferences for US or UK.
     # Default is to use a neutral variety of English.
@@ -239,6 +261,11 @@ linters-settings:
     allow-case-traling-whitespace: true
     # Allow declarations (var) to be cuddled.
     allow-cuddle-declarations: false
+  testifylint:
+    disable:
+      - float-compare
+      - negative-positive
+      - go-require
 
 linters:
   fast: false
@@ -254,28 +281,24 @@ linters:
     - gocyclo
     - gocognit
     - godox
-    - interfacer
     - lll
-    - maligned
-    - scopelint
     - unparam
     - wsl
+    - mnd
     - gomnd
     - testpackage
-    - goerr113
+    - err113
     - nestif
     - nlreturn
     - exhaustive
     - exhaustruct
     - noctx
     - gci
-    - golint
     - tparallel
     - paralleltest
     - wrapcheck
     - tagliatelle
     - ireturn
-    - exhaustivestruct
     - errchkjson
     - contextcheck
     - gomoddirectives
@@ -284,7 +307,6 @@ linters:
     - varnamelen
     - errorlint
     - forcetypeassert
-    - ifshort
     - maintidx
     - nilnil
     - predeclared
@@ -297,7 +319,8 @@ linters:
     - asasalint
     - rowserrcheck
     - sqlclosecheck
-    - structcheck
-    - deadcode
-    - nosnakecase
-    - varcheck
+    - goconst
+    - tagalign
+    - inamedparam
+    - canonicalheader
+    - fatcontext

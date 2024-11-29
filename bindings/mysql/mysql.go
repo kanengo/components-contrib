@@ -33,6 +33,7 @@ import (
 	"github.com/dapr/components-contrib/bindings"
 	"github.com/dapr/components-contrib/metadata"
 	"github.com/dapr/kit/logger"
+	kitmd "github.com/dapr/kit/metadata"
 )
 
 const (
@@ -107,13 +108,13 @@ func (m *Mysql) Init(ctx context.Context, md bindings.Metadata) error {
 
 	// Parse metadata
 	meta := mysqlMetadata{}
-	err := metadata.DecodeMetadata(md.Properties, &meta)
+	err := kitmd.DecodeMetadata(md.Properties, &meta)
 	if err != nil {
 		return err
 	}
 
 	if meta.URL == "" {
-		return fmt.Errorf("missing MySql connection string")
+		return errors.New("missing MySql connection string")
 	}
 
 	m.db, err = initDB(meta.URL, meta.PemPath)
@@ -280,7 +281,7 @@ func initDB(url, pemPath string) (*sql.DB, error) {
 
 		ok := rootCertPool.AppendCertsFromPEM(pem)
 		if !ok {
-			return nil, fmt.Errorf("failed to append PEM")
+			return nil, errors.New("failed to append PEM")
 		}
 
 		err = mysql.RegisterTLSConfig("custom", &tls.Config{

@@ -34,6 +34,7 @@ import (
 	"github.com/dapr/components-contrib/metadata"
 	"github.com/dapr/components-contrib/secretstores"
 	"github.com/dapr/kit/logger"
+	kitmd "github.com/dapr/kit/metadata"
 )
 
 const (
@@ -141,7 +142,7 @@ func (v *vaultSecretStore) Init(_ context.Context, meta secretstores.Metadata) e
 	m := VaultMetadata{
 		VaultKVUsePrefix: true,
 	}
-	err := metadata.DecodeMetadata(meta.Properties, &m)
+	err := kitmd.DecodeMetadata(meta.Properties, &m)
 	if err != nil {
 		return err
 	}
@@ -399,12 +400,12 @@ func (v *vaultSecretStore) isSecretPath(key string) bool {
 func (v *vaultSecretStore) initVaultToken() error {
 	// Test that at least one of them are set if not return error
 	if v.vaultToken == "" && v.vaultTokenMountPath == "" {
-		return fmt.Errorf("token mount path and token not set")
+		return errors.New("token mount path and token not set")
 	}
 
 	// Test that both are not set. If so return error
 	if v.vaultToken != "" && v.vaultTokenMountPath != "" {
-		return fmt.Errorf("token mount path and token both set")
+		return errors.New("token mount path and token both set")
 	}
 
 	if v.vaultToken != "" {
@@ -463,7 +464,7 @@ func (v *vaultSecretStore) getRootCAsPools(vaultCAPem string, vaultCAPath string
 		certPool := x509.NewCertPool()
 		cert := []byte(vaultCAPem)
 		if ok := certPool.AppendCertsFromPEM(cert); !ok {
-			return nil, fmt.Errorf("couldn't read PEM")
+			return nil, errors.New("couldn't read PEM")
 		}
 
 		return certPool, nil
@@ -504,7 +505,7 @@ func readCertificateFile(certPool *x509.CertPool, path string) error {
 	}
 
 	if ok := certPool.AppendCertsFromPEM(pemFile); !ok {
-		return fmt.Errorf("couldn't read PEM")
+		return errors.New("couldn't read PEM")
 	}
 
 	return nil
@@ -539,4 +540,8 @@ func (v *vaultSecretStore) GetComponentMetadata() (metadataInfo metadata.Metadat
 	metadataStruct := VaultMetadata{}
 	metadata.GetMetadataInfoFromStructType(reflect.TypeOf(metadataStruct), &metadataInfo, metadata.SecretStoreType)
 	return
+}
+
+func (v *vaultSecretStore) Close() error {
+	return nil
 }

@@ -38,7 +38,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/multierr"
 
-	"github.com/dapr/components-contrib/internal/authentication/oauth2"
+	"github.com/dapr/components-contrib/common/authentication/oauth2"
 	pubsub_pulsar "github.com/dapr/components-contrib/pubsub/pulsar"
 	pubsub_loader "github.com/dapr/dapr/pkg/components/pubsub"
 	"github.com/dapr/dapr/pkg/config/protocol"
@@ -123,7 +123,7 @@ func TestPulsar(t *testing.T) {
 
 		t.Log("Starting OAuth2 server...")
 		out, err := exec.Command(
-			"docker-compose",
+			"docker", "compose",
 			"-p", "oauth2",
 			"-f", dockerComposeMockOAuth2YAML,
 			"up", "-d").CombinedOutput()
@@ -133,7 +133,7 @@ func TestPulsar(t *testing.T) {
 		t.Cleanup(func() {
 			t.Log("Stopping OAuth2 server...")
 			out, err = exec.Command(
-				"docker-compose",
+				"docker", "compose",
 				"-p", "oauth2",
 				"-f", dockerComposeMockOAuth2YAML,
 				"down", "-v",

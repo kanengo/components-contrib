@@ -2,12 +2,12 @@ package kubemq
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/kubemq-io/kubemq-go"
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/dapr/components-contrib/pubsub"
 	"github.com/dapr/kit/logger"
@@ -111,7 +111,7 @@ func Test_kubeMQEvents_Publish(t *testing.T) {
 				Topic: "some-topic",
 			},
 			resultError: nil,
-			publishErr:  fmt.Errorf("some error"),
+			publishErr:  errors.New("some error"),
 			wantErr:     true,
 		},
 	}
@@ -138,9 +138,9 @@ func Test_kubeMQEvents_Publish(t *testing.T) {
 		_ = k.setPublishStream()
 		err := k.Publish(tt.req)
 		if tt.wantErr {
-			assert.Error(t, err)
+			require.Error(t, err)
 		} else {
-			assert.NoError(t, err)
+			require.NoError(t, err)
 		}
 		_ = k.Features()
 		_ = k.Close()
@@ -175,7 +175,7 @@ func Test_kubeMQEvents_Subscribe(t *testing.T) {
 			subscribeHandler: func(ctx context.Context, msg *pubsub.NewMessage) error {
 				return nil
 			},
-			subscribeError: fmt.Errorf("some error"),
+			subscribeError: errors.New("some error"),
 			wantErr:        true,
 		},
 	}
@@ -195,9 +195,9 @@ func Test_kubeMQEvents_Subscribe(t *testing.T) {
 		}
 		err := k.Subscribe(k.ctx, pubsub.SubscribeRequest{Topic: "some-topic"}, tt.subscribeHandler)
 		if tt.wantErr {
-			assert.Error(t, err)
+			require.Error(t, err)
 		} else {
-			assert.NoError(t, err)
+			require.NoError(t, err)
 		}
 		_ = k.Features()
 		_ = k.Close()

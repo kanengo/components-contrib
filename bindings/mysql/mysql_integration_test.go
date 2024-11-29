@@ -37,7 +37,7 @@ func TestOperations(t *testing.T) {
 		b := NewMysql(logger.NewLogger("test"))
 		require.NotNil(t, b)
 		l := b.Operations()
-		assert.Equal(t, 3, len(l))
+		assert.Len(t, l, 3)
 		assert.Contains(t, l, execOperation)
 		assert.Contains(t, l, closeOperation)
 		assert.Contains(t, l, queryOperation)
@@ -91,7 +91,7 @@ func TestMysqlIntegration(t *testing.T) {
 	})
 
 	t.Run("Invoke insert", func(t *testing.T) {
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			res, err := b.Invoke(context.Background(), &bindings.InvokeRequest{
 				Operation: execOperation,
 				Metadata: map[string]string{
@@ -106,7 +106,7 @@ func TestMysqlIntegration(t *testing.T) {
 
 	t.Run("Invoke update", func(t *testing.T) {
 		date := time.Now().Add(time.Hour)
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			res, err := b.Invoke(context.Background(), &bindings.InvokeRequest{
 				Operation: execOperation,
 				Metadata: map[string]string{
@@ -122,7 +122,7 @@ func TestMysqlIntegration(t *testing.T) {
 
 	t.Run("Invoke update with parameters", func(t *testing.T) {
 		date := time.Now().Add(2 * time.Hour)
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			res, err := b.Invoke(context.Background(), &bindings.InvokeRequest{
 				Operation: execOperation,
 				Metadata: map[string]string{
@@ -154,7 +154,7 @@ func TestMysqlIntegration(t *testing.T) {
 		result := make([]any, 0)
 		err = json.Unmarshal(res.Data, &result)
 		require.NoError(t, err)
-		assert.Equal(t, 3, len(result))
+		assert.Len(t, len(result), 3)
 
 		// verify timestamp
 		ts, ok := result[0].(map[string]any)["ts"].(string)
@@ -186,7 +186,7 @@ func TestMysqlIntegration(t *testing.T) {
 		result := make([]any, 0)
 		err = json.Unmarshal(res.Data, &result)
 		require.NoError(t, err)
-		assert.Equal(t, 1, len(result))
+		assert.Len(t, len(result), 1)
 	})
 
 	t.Run("Invoke drop", func(t *testing.T) {
@@ -203,14 +203,14 @@ func TestMysqlIntegration(t *testing.T) {
 		_, err := b.Invoke(context.Background(), &bindings.InvokeRequest{
 			Operation: closeOperation,
 		})
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	})
 }
 
 func assertResponse(t *testing.T, res *bindings.InvokeResponse, err error) {
 	t.Helper()
 
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.NotNil(t, res)
 	if res != nil {
 		assert.NotEmpty(t, res.Metadata)

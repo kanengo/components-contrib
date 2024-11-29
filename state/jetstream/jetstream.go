@@ -16,7 +16,6 @@ package jetstream
 import (
 	"context"
 	"errors"
-	"io"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -29,6 +28,7 @@ import (
 	"github.com/dapr/components-contrib/state"
 	"github.com/dapr/components-contrib/state/utils"
 	"github.com/dapr/kit/logger"
+	kitmd "github.com/dapr/kit/metadata"
 )
 
 // StateStore is a nats jetstream KV state store.
@@ -127,7 +127,7 @@ func (js *StateStore) Delete(ctx context.Context, req *state.DeleteRequest) erro
 
 func (js *StateStore) getMetadata(meta state.Metadata) (jetstreamMetadata, error) {
 	var m jetstreamMetadata
-	err := metadata.DecodeMetadata(meta.Properties, &m)
+	err := kitmd.DecodeMetadata(meta.Properties, &m)
 	if err != nil {
 		return jetstreamMetadata{}, err
 	}
@@ -185,5 +185,3 @@ func (js *StateStore) Close() error {
 	}
 	return nil
 }
-
-var _ io.Closer = (*StateStore)(nil)

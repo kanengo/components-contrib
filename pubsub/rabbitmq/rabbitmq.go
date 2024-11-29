@@ -31,6 +31,7 @@ import (
 	"github.com/dapr/components-contrib/metadata"
 	"github.com/dapr/components-contrib/pubsub"
 	"github.com/dapr/kit/logger"
+	"github.com/dapr/kit/utils"
 )
 
 const (
@@ -45,17 +46,22 @@ const (
 
 	publishMaxRetries       = 3
 	publishRetryWaitSeconds = 2
+	defaultHeartbeat        = 10 * time.Second
+	defaultLocale           = "en_US"
 
-	argQueueMode              = "x-queue-mode"
-	argMaxLength              = "x-max-length"
-	argMaxLengthBytes         = "x-max-length-bytes"
-	argDeadLetterExchange     = "x-dead-letter-exchange"
-	argMaxPriority            = "x-max-priority"
-	queueModeLazy             = "lazy"
-	reqMetadataRoutingKey     = "routingKey"
-	reqMetadataQueueTypeKey   = "queueType" // at the moment, only supporting classic and quorum queues
-	reqMetadataMaxLenKey      = "maxLen"
-	reqMetadataMaxLenBytesKey = "maxLenBytes"
+	argQueueMode                       = "x-queue-mode"
+	argMaxLength                       = "x-max-length"
+	argMaxLengthBytes                  = "x-max-length-bytes"
+	argDeadLetterExchange              = "x-dead-letter-exchange"
+	argMaxPriority                     = "x-max-priority"
+	argSingleActiveConsumer            = "x-single-active-consumer"
+	propertyClientName                 = "connection_name"
+	queueModeLazy                      = "lazy"
+	reqMetadataRoutingKey              = "routingKey"
+	reqMetadataQueueTypeKey            = "queueType" // at the moment, only supporting classic and quorum queues
+	reqMetadataSingleActiveConsumerKey = "singleActiveConsumer"
+	reqMetadataMaxLenKey               = "maxLen"
+	reqMetadataMaxLenBytesKey          = "maxLenBytes"
 )
 
 // RabbitMQ allows sending/receiving messages in pub/sub format.
@@ -67,7 +73,7 @@ type rabbitMQ struct {
 	metadata          *rabbitmqMetadata
 	declaredExchanges map[string]bool
 
-	connectionDial func(protocol, uri string, tlsCfg *tls.Config, externalSasl bool) (rabbitMQConnectionBroker, rabbitMQChannelBroker, error)
+	connectionDial func(protocol, uri, clientName string, heartBeat time.Duration, tlsCfg *tls.Config, externalSasl bool) (rabbitMQConnectionBroker, rabbitMQChannelBroker, error)
 	closeCh        chan struct{}
 	closed         atomic.Bool
 	wg             sync.WaitGroup
@@ -108,22 +114,26 @@ func NewRabbitMQ(logger logger.Logger) pubsub.PubSub {
 	}
 }
 
-func dial(protocol, uri string, tlsCfg *tls.Config, externalSasl bool) (rabbitMQConnectionBroker, rabbitMQChannelBroker, error) {
+func dial(protocol, uri, clientName string, heartBeat time.Duration, tlsCfg *tls.Config, externalSasl bool) (rabbitMQConnectionBroker, rabbitMQChannelBroker, error) {
 	var (
 		conn *amqp.Connection
 		ch   *amqp.Channel
 		err  error
+		cfg  = amqp.Config{Heartbeat: heartBeat, Locale: defaultLocale} // use default locale of amqp091-go
 	)
+	if len(clientName) > 0 {
+		cfg.Properties = map[string]interface{}{
+			propertyClientName: clientName,
+		}
+	}
 
 	if protocol == protocolAMQPS {
+		cfg.TLSClientConfig = tlsCfg
 		if externalSasl {
-			conn, err = amqp.DialTLS_ExternalAuth(uri, tlsCfg)
-		} else {
-			conn, err = amqp.DialTLS(uri, tlsCfg)
+			cfg.SASL = []amqp.Authentication{&amqp.ExternalAuth{}}
 		}
-	} else {
-		conn, err = amqp.Dial(uri)
 	}
+	conn, err = amqp.DialConfig(uri, cfg)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -146,10 +156,10 @@ func (r *rabbitMQ) Init(_ context.Context, metadata pubsub.Metadata) error {
 
 	r.metadata = meta
 
-	r.reconnect(0)
-	// We do not return error on reconnect because it can cause problems if init() happens
-	// right at the restart window for service. So, we try it now but there is logic in the
-	// code to reconnect as many times as needed.
+	if err := r.reconnect(0); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -180,7 +190,7 @@ func (r *rabbitMQ) reconnect(connectionCount int) error {
 		return err
 	}
 
-	r.connection, r.channel, err = r.connectionDial(r.metadata.internalProtocol, r.metadata.connectionURI(), tlsCfg, r.metadata.SaslExternal)
+	r.connection, r.channel, err = r.connectionDial(r.metadata.internalProtocol, r.metadata.connectionURI(), r.metadata.ClientName, r.metadata.HeartBeat, tlsCfg, r.metadata.SaslExternal)
 	if err != nil {
 		r.reset()
 
@@ -261,7 +271,7 @@ func (r *rabbitMQ) publishSync(ctx context.Context, req *pubsub.PublishRequest) 
 		// Blocks until the server confirms
 		ok := confirm.Wait()
 		if !ok {
-			err = fmt.Errorf("did not receive confirmation of publishing")
+			err = errors.New("did not receive confirmation of publishing")
 			r.logger.Errorf("%s publishing to %s failed: %v", logMessagePrefix, req.Topic, err)
 		}
 	}
@@ -424,6 +434,11 @@ func (r *rabbitMQ) prepareSubscription(channel rabbitMQChannelBroker, req pubsub
 		args[amqp.QueueTypeArg] = amqp.QueueTypeClassic
 	}
 
+	// Applying x-single-active-consumer if defined at subscription level
+	if val := req.Metadata[reqMetadataSingleActiveConsumerKey]; utils.IsTruthy(val) {
+		args[argSingleActiveConsumer] = true
+	}
+
 	// Applying x-max-length-bytes if defined at subscription level
 	if val, ok := req.Metadata[reqMetadataMaxLenBytesKey]; ok && val != "" {
 		parsedVal, pErr := strconv.ParseUint(val, 10, 0)
@@ -466,7 +481,7 @@ func (r *rabbitMQ) prepareSubscription(channel rabbitMQChannelBroker, req pubsub
 		metadataRoutingKey = val
 	}
 	routingKeys := strings.Split(metadataRoutingKey, ",")
-	for i := 0; i < len(routingKeys); i++ {
+	for i := range routingKeys {
 		routingKey := routingKeys[i]
 		r.logger.Debugf("%s binding queue '%s' to exchange '%s' with routing key '%s'", logMessagePrefix, q.Name, req.Topic, routingKey)
 		err = channel.QueueBind(q.Name, routingKey, req.Topic, false, nil)
@@ -505,7 +520,6 @@ func (r *rabbitMQ) subscribeForever(ctx context.Context, req pubsub.SubscribeReq
 		)
 		for {
 			channel, connectionCount, q, err = r.ensureSubscription(req, queueName)
-
 			if err != nil {
 				errFuncName = "ensureSubscription"
 				break
@@ -513,7 +527,7 @@ func (r *rabbitMQ) subscribeForever(ctx context.Context, req pubsub.SubscribeReq
 
 			msgs, err = channel.Consume(
 				q.Name,
-				queueName,          // consumerId
+				queueName,          // consumerID
 				r.metadata.AutoAck, // autoAck
 				false,              // exclusive
 				false,              // noLocal

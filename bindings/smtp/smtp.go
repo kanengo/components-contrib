@@ -27,6 +27,7 @@ import (
 	"github.com/dapr/components-contrib/bindings"
 	"github.com/dapr/components-contrib/metadata"
 	"github.com/dapr/kit/logger"
+	kitmd "github.com/dapr/kit/metadata"
 )
 
 const (
@@ -87,13 +88,13 @@ func (s *Mailer) Invoke(_ context.Context, req *bindings.InvokeRequest) (*bindin
 		return nil, err
 	}
 	if metadata.EmailFrom == "" {
-		return nil, fmt.Errorf("smtp binding error: emailFrom property not supplied in configuration- or request-metadata")
+		return nil, errors.New("smtp binding error: emailFrom property not supplied in configuration- or request-metadata")
 	}
 	if metadata.EmailTo == "" {
-		return nil, fmt.Errorf("smtp binding error: emailTo property not supplied in configuration- or request-metadata")
+		return nil, errors.New("smtp binding error: emailTo property not supplied in configuration- or request-metadata")
 	}
 	if metadata.Subject == "" {
-		return nil, fmt.Errorf("smtp binding error: subject property not supplied in configuration- or request-metadata")
+		return nil, errors.New("smtp binding error: subject property not supplied in configuration- or request-metadata")
 	}
 
 	// Compose message
@@ -140,7 +141,7 @@ func (s *Mailer) Invoke(_ context.Context, req *bindings.InvokeRequest) (*bindin
 // Helper to parse metadata.
 func (s *Mailer) parseMetadata(meta bindings.Metadata) (Metadata, error) {
 	smtpMeta := Metadata{}
-	err := metadata.DecodeMetadata(meta.Properties, &smtpMeta)
+	err := kitmd.DecodeMetadata(meta.Properties, &smtpMeta)
 	if err != nil {
 		return smtpMeta, err
 	}
@@ -167,7 +168,6 @@ func (s *Mailer) parseMetadata(meta bindings.Metadata) (Metadata, error) {
 	}
 
 	err = smtpMeta.parsePriority(meta.Properties["priority"])
-
 	if err != nil {
 		return smtpMeta, err
 	}
@@ -235,4 +235,8 @@ func (s *Mailer) GetComponentMetadata() (metadataInfo metadata.MetadataMap) {
 	metadataStruct := Metadata{}
 	metadata.GetMetadataInfoFromStructType(reflect.TypeOf(metadataStruct), &metadataInfo, metadata.BindingType)
 	return
+}
+
+func (s *Mailer) Close() error {
+	return nil
 }

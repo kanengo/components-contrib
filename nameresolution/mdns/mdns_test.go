@@ -14,6 +14,7 @@ limitations under the License.
 package mdns
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"sync"
@@ -24,7 +25,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dapr/components-contrib/metadata"
 	nr "github.com/dapr/components-contrib/nameresolution"
 	"github.com/dapr/kit/logger"
 )
@@ -37,35 +37,35 @@ const (
 func TestInitMetadata(t *testing.T) {
 	tests := []struct {
 		missingProp string
-		props       map[string]string
+		instance    nr.Instance
 	}{
 		{
 			"name",
-			map[string]string{
-				nr.HostAddress: localhost,
-				nr.DaprPort:    "30003",
+			nr.Instance{
+				Address:          localhost,
+				DaprInternalPort: 30003,
 			},
 		},
 		{
 			"address",
-			map[string]string{
-				nr.AppID:    "testAppID",
-				nr.DaprPort: "30003",
+			nr.Instance{
+				AppID:            "testAppID",
+				DaprInternalPort: 30003,
 			},
 		},
 		{
 			"port",
-			map[string]string{
-				nr.AppID:       "testAppID",
-				nr.HostAddress: localhost,
+			nr.Instance{
+				AppID:   "testAppID",
+				Address: localhost,
 			},
 		},
 		{
 			"port",
-			map[string]string{
-				nr.AppID:       "testAppID",
-				nr.HostAddress: localhost,
-				nr.DaprPort:    "abcd",
+			nr.Instance{
+				AppID:            "testAppID",
+				Address:          localhost,
+				DaprInternalPort: 0,
 			},
 		},
 	}
@@ -77,10 +77,10 @@ func TestInitMetadata(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.missingProp+" is missing", func(t *testing.T) {
 			// act
-			err := resolver.Init(nr.Metadata{Base: metadata.Base{Properties: tt.props}})
+			err := resolver.Init(context.Background(), nr.Metadata{Instance: tt.instance})
 
 			// assert
-			assert.Error(t, err)
+			require.Error(t, err)
 		})
 	}
 }
@@ -89,14 +89,14 @@ func TestInitRegister(t *testing.T) {
 	// arrange
 	resolver := NewResolver(logger.NewLogger("test")).(*Resolver)
 	defer resolver.Close()
-	md := nr.Metadata{Base: metadata.Base{Properties: map[string]string{
-		nr.AppID:       "testAppID",
-		nr.HostAddress: localhost,
-		nr.DaprPort:    "1234",
-	}}}
+	md := nr.Metadata{Instance: nr.Instance{
+		AppID:            "testAppID",
+		Address:          localhost,
+		DaprInternalPort: 1234,
+	}}
 
 	// act
-	err := resolver.Init(md)
+	err := resolver.Init(context.Background(), md)
 	require.NoError(t, err)
 }
 
@@ -104,21 +104,21 @@ func TestInitRegisterDuplicate(t *testing.T) {
 	// arrange
 	resolver := NewResolver(logger.NewLogger("test")).(*Resolver)
 	defer resolver.Close()
-	md := nr.Metadata{Base: metadata.Base{Properties: map[string]string{
-		nr.AppID:       "testAppID",
-		nr.HostAddress: localhost,
-		nr.DaprPort:    "1234",
-	}}}
-	md2 := nr.Metadata{Base: metadata.Base{Properties: map[string]string{
-		nr.AppID:       "testAppID",
-		nr.HostAddress: localhost,
-		nr.DaprPort:    "1234",
-	}}}
+	md := nr.Metadata{Instance: nr.Instance{
+		AppID:            "testAppID",
+		Address:          localhost,
+		DaprInternalPort: 1234,
+	}}
+	md2 := nr.Metadata{Instance: nr.Instance{
+		AppID:            "testAppID",
+		Address:          localhost,
+		DaprInternalPort: 1234,
+	}}
 
 	// act
-	err := resolver.Init(md)
+	err := resolver.Init(context.Background(), md)
 	require.NoError(t, err)
-	err = resolver.Init(md2)
+	err = resolver.Init(context.Background(), md2)
 	expectedError := "app id testAppID already registered for port 1234"
 	require.EqualErrorf(t, err, expectedError, "Error should be: %v, got %v", expectedError, err)
 }
@@ -127,43 +127,43 @@ func TestResolver(t *testing.T) {
 	// arrange
 	resolver := NewResolver(logger.NewLogger("test")).(*Resolver)
 	defer resolver.Close()
-	md := nr.Metadata{Base: metadata.Base{Properties: map[string]string{
-		nr.AppID:       "testAppID",
-		nr.HostAddress: localhost,
-		nr.DaprPort:    "1234",
-	}}}
+	md := nr.Metadata{Instance: nr.Instance{
+		AppID:            "testAppID",
+		Address:          localhost,
+		DaprInternalPort: 1234,
+	}}
 
 	// act
-	err := resolver.Init(md)
+	err := resolver.Init(context.Background(), md)
 	require.NoError(t, err)
 
 	request := nr.ResolveRequest{ID: "testAppID"}
-	pt, err := resolver.ResolveID(request)
+	pt, err := resolver.ResolveID(context.Background(), request)
 
 	// assert
 	require.NoError(t, err)
-	assert.Equal(t, fmt.Sprintf("%s:1234", localhost), pt)
+	assert.Equal(t, localhost+":1234", pt)
 }
 
 func TestResolverClose(t *testing.T) {
 	// arrange
 	resolver := NewResolver(logger.NewLogger("test")).(*Resolver)
-	md := nr.Metadata{Base: metadata.Base{Properties: map[string]string{
-		nr.AppID:       "testAppID",
-		nr.HostAddress: localhost,
-		nr.DaprPort:    "1234",
-	}}}
+	md := nr.Metadata{Instance: nr.Instance{
+		AppID:            "testAppID",
+		Address:          localhost,
+		DaprInternalPort: 1234,
+	}}
 
 	// act
-	err := resolver.Init(md)
+	err := resolver.Init(context.Background(), md)
 	require.NoError(t, err)
 
 	request := nr.ResolveRequest{ID: "testAppID"}
-	pt, err := resolver.ResolveID(request)
+	pt, err := resolver.ResolveID(context.Background(), request)
 
 	// assert
 	require.NoError(t, err)
-	assert.Equal(t, fmt.Sprintf("%s:1234", localhost), pt)
+	assert.Equal(t, localhost+":1234", pt)
 
 	// act again
 	err = resolver.Close()
@@ -203,7 +203,7 @@ func TestResolverMultipleInstances(t *testing.T) {
 	request := nr.ResolveRequest{ID: "testAppID"}
 
 	// first resolution will return the first responder's address and trigger a cache refresh.
-	addr1, err := resolver.ResolveID(request)
+	addr1, err := resolver.ResolveID(context.Background(), request)
 	require.NoError(t, err)
 	require.Contains(t, []string{instanceAPQDN, instanceBPQDN}, addr1)
 
@@ -217,8 +217,8 @@ func TestResolverMultipleInstances(t *testing.T) {
 	// instance A and instance B and we see them each atleast m times.
 	instanceACount := atomic.Uint32{}
 	instanceBCount := atomic.Uint32{}
-	for i := 0; i < 100; i++ {
-		addr, err := resolver.ResolveID(request)
+	for range 100 {
+		addr, err := resolver.ResolveID(context.Background(), request)
 		require.NoError(t, err)
 		require.Contains(t, []string{instanceAPQDN, instanceBPQDN}, addr)
 		if addr == instanceAPQDN {
@@ -239,7 +239,7 @@ func TestResolverNotFound(t *testing.T) {
 
 	// act
 	request := nr.ResolveRequest{ID: "testAppIDNotFound"}
-	pt, err := resolver.ResolveID(request)
+	pt, err := resolver.ResolveID(context.Background(), request)
 
 	// assert
 	expectedError := "couldn't find service: testAppIDNotFound"
@@ -281,27 +281,27 @@ func ResolverConcurrencySubsriberClear(t *testing.T) {
 	// arrange
 	resolver := NewResolver(logger.NewLogger("test")).(*Resolver)
 	defer resolver.Close()
-	md := nr.Metadata{Base: metadata.Base{Properties: map[string]string{
-		nr.AppID:       "testAppID",
-		nr.HostAddress: localhost,
-		nr.DaprPort:    "1234",
-	}}}
+	md := nr.Metadata{Instance: nr.Instance{
+		AppID:            "testAppID",
+		Address:          localhost,
+		DaprInternalPort: 1234,
+	}}
 
 	// act
-	err := resolver.Init(md)
+	err := resolver.Init(context.Background(), md)
 	require.NoError(t, err)
 
 	request := nr.ResolveRequest{ID: "testAppID"}
 
 	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 
-			pt, err := resolver.ResolveID(request)
+			pt, err := resolver.ResolveID(context.Background(), request)
 			require.NoError(t, err)
-			require.Equal(t, fmt.Sprintf("%s:1234", localhost), pt)
+			require.Equal(t, localhost+":1234", pt)
 		}()
 	}
 
@@ -309,7 +309,7 @@ func ResolverConcurrencySubsriberClear(t *testing.T) {
 
 	// Wait long enough for the background clear to occur.
 	time.Sleep(3 * time.Second)
-	require.Equal(t, 0, len(resolver.subs))
+	require.Empty(t, resolver.subs)
 }
 
 // WARN: This is deliberately not a test function.
@@ -354,7 +354,7 @@ func ResolverConcurrencyFound(t *testing.T) {
 
 	// act...
 	wg := sync.WaitGroup{}
-	for i := 0; i < numConcurrency; i++ {
+	for i := range numConcurrency {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -371,7 +371,7 @@ func ResolverConcurrencyFound(t *testing.T) {
 			request := nr.ResolveRequest{ID: appID}
 
 			start := time.Now()
-			pt, err := resolver.ResolveID(request)
+			pt, err := resolver.ResolveID(context.Background(), request)
 			elapsed := time.Since(start)
 			// assert
 			require.NoError(t, err)
@@ -401,7 +401,7 @@ func ResolverConcurrencyNotFound(t *testing.T) {
 
 	// act...
 	wg := sync.WaitGroup{}
-	for i := 0; i < numConcurrency; i++ {
+	for i := range numConcurrency {
 		idx := i
 		wg.Add(1)
 		go func() {
@@ -420,7 +420,7 @@ func ResolverConcurrencyNotFound(t *testing.T) {
 
 			// act
 			start := time.Now()
-			pt, err := resolver.ResolveID(request)
+			pt, err := resolver.ResolveID(context.Background(), request)
 			elapsed := time.Since(start)
 
 			// assert
@@ -509,7 +509,7 @@ func TestAddressListAddExisitingAddress(t *testing.T) {
 
 	// assert
 	require.Len(t, addressList.addresses, 2)
-	require.Greater(t, deltaSec, 0) // Ensures expiry has been extended for existing address.
+	require.Positive(t, deltaSec, 0) // Ensures expiry has been extended for existing address.
 }
 
 func TestAddressListNext(t *testing.T) {
@@ -739,6 +739,6 @@ func TestUnion(t *testing.T) {
 				}
 			}
 		}
-		require.Equal(t, len(tt.expected), matches)
+		require.Len(t, tt.expected, matches)
 	}
 }

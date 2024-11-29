@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"k8s.io/utils/clock"
 	clocktesting "k8s.io/utils/clock/testing"
 
@@ -86,9 +87,9 @@ func TestCronInitSuccess(t *testing.T) {
 		c := getNewCron()
 		err := c.Init(context.Background(), getTestMetadata(test.schedule))
 		if test.errorExpected {
-			assert.Errorf(t, err, "Got no error while initializing an invalid schedule: %s", test.schedule)
+			require.Errorf(t, err, "Got no error while initializing an invalid schedule: %s", test.schedule)
 		} else {
-			assert.NoErrorf(t, err, "error initializing valid schedule: %s", test.schedule)
+			require.NoErrorf(t, err, "error initializing valid schedule: %s", test.schedule)
 		}
 	}
 }
@@ -99,7 +100,7 @@ func TestCronRead(t *testing.T) {
 	clk := clocktesting.NewFakeClock(time.Now())
 	c := getNewCronWithClock(clk)
 	schedule := "@every 1s"
-	assert.NoErrorf(t, c.Init(context.Background(), getTestMetadata(schedule)), "error initializing valid schedule")
+	require.NoErrorf(t, c.Init(context.Background(), getTestMetadata(schedule)), "error initializing valid schedule")
 	expectedCount := int32(5)
 	var observedCount atomic.Int32
 	err := c.Read(context.Background(), func(ctx context.Context, res *bindings.ReadResponse) ([]byte, error) {
@@ -108,7 +109,7 @@ func TestCronRead(t *testing.T) {
 		return nil, nil
 	})
 	// Check if cron triggers 5 times in 5 seconds
-	for i := int32(0); i < expectedCount; i++ {
+	for range expectedCount {
 		// Add time to mock clock in 1 second intervals using loop to allow cron go routine to run
 		clk.Step(time.Second)
 		runtime.Gosched()
@@ -119,15 +120,15 @@ func TestCronRead(t *testing.T) {
 		return observedCount.Load() == expectedCount
 	}, time.Second, time.Millisecond*10,
 		"Cron did not trigger expected number of times, expected %d, got %d", expectedCount, observedCount.Load())
-	assert.NoErrorf(t, err, "error on read")
-	assert.NoError(t, c.Close())
+	require.NoErrorf(t, err, "error on read")
+	require.NoError(t, c.Close())
 }
 
 func TestCronReadWithContextCancellation(t *testing.T) {
 	clk := clocktesting.NewFakeClock(time.Now())
 	c := getNewCronWithClock(clk)
 	schedule := "@every 1s"
-	assert.NoErrorf(t, c.Init(context.Background(), getTestMetadata(schedule)), "error initializing valid schedule")
+	require.NoErrorf(t, c.Init(context.Background(), getTestMetadata(schedule)), "error initializing valid schedule")
 	expectedCount := int32(5)
 	var observedCount atomic.Int32
 	ctx, cancel := context.WithCancel(context.Background())
@@ -142,7 +143,7 @@ func TestCronReadWithContextCancellation(t *testing.T) {
 		return nil, nil
 	})
 	// Check if cron triggers only 5 times in 10 seconds since context should be cancelled after 5 triggers
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		// Add time to mock clock in 1 second intervals using loop to allow cron go routine to run
 		clk.Step(time.Second)
 		runtime.Gosched()
@@ -152,6 +153,6 @@ func TestCronReadWithContextCancellation(t *testing.T) {
 		return observedCount.Load() == expectedCount
 	}, time.Second, time.Millisecond*10,
 		"Cron did not trigger expected number of times, expected %d, got %d", expectedCount, observedCount.Load())
-	assert.NoErrorf(t, err, "error on read")
-	assert.NoError(t, c.Close())
+	require.NoErrorf(t, err, "error on read")
+	require.NoError(t, c.Close())
 }

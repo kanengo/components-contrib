@@ -19,11 +19,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/dapr/components-contrib/state/query"
 )
 
-func TestMongoQuery(t *testing.T) {
+func TestRedisQuery(t *testing.T) {
 	tests := []struct {
 		input string
 		query []interface{}
@@ -43,22 +44,30 @@ func TestMongoQuery(t *testing.T) {
 		},
 		{
 			input: "../../tests/state/query/q6.json",
-			query: []interface{}{"((@id:[123 123])|((@org:(B)) (((@id:[567 567])|(@id:[890 890])))))", "SORTBY", "id", "LIMIT", "0", "2"},
+			query: []interface{}{"((@id:[123.000000 123.000000])|((@org:(B)) (((@id:[567.000000 567.000000])|(@id:[890.000000 890.000000])))))", "SORTBY", "id", "LIMIT", "0", "2"},
+		},
+		{
+			input: "../../tests/state/query/q6-notequal.json",
+			query: []interface{}{"((@id:[123.000000 123.000000])|(-(@org:(B)) (((@id:[567.000000 567.000000])|(@id:[890.000000 890.000000])))))", "SORTBY", "id", "LIMIT", "0", "2"},
+		},
+		{
+			input: "../../tests/state/query/q7.json",
+			query: []interface{}{"((@id:[-inf (123.000000])|((@org:[2.000000 +inf]) (((@id:[567.000000 567.000000])|(@id:[890.000000 890.000000])))))", "SORTBY", "id", "LIMIT", "0", "2"},
 		},
 	}
 	for _, test := range tests {
 		data, err := os.ReadFile(test.input)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		var qq query.Query
 		err = json.Unmarshal(data, &qq)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		q := &Query{
 			aliases: map[string]string{"person.org": "org", "person.id": "id", "state": "state"},
 		}
 		qbuilder := query.NewQueryBuilder(q)
 		if err = qbuilder.BuildQuery(&qq); err != nil {
-			assert.EqualError(t, err, test.err.Error())
+			require.EqualError(t, err, test.err.Error())
 		} else {
 			assert.Equal(t, test.query, q.query)
 		}

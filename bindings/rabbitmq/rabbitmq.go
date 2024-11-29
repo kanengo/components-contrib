@@ -28,13 +28,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dapr/components-contrib/internal/utils"
-
 	amqp "github.com/rabbitmq/amqp091-go"
 
 	"github.com/dapr/components-contrib/bindings"
 	"github.com/dapr/components-contrib/metadata"
 	"github.com/dapr/kit/logger"
+	kitmd "github.com/dapr/kit/metadata"
+	"github.com/dapr/kit/utils"
 )
 
 const (
@@ -87,7 +87,7 @@ type rabbitMQMetadata struct {
 	PrefetchCount    int            `mapstructure:"prefetchCount"`
 	MaxPriority      *uint8         `mapstructure:"maxPriority"` // Priority Queue deactivated if nil
 	ReconnectWait    time.Duration  `mapstructure:"reconnectWaitInSeconds"`
-	DefaultQueueTTL  *time.Duration `mapstructure:"ttlInSeconds"`
+	DefaultQueueTTL  *time.Duration `mapstructure:"ttl" mapstructurealiases:"ttlInSeconds"`
 	CaCert           string         `mapstructure:"caCert"`
 	ClientCert       string         `mapstructure:"clientCert"`
 	ClientKey        string         `mapstructure:"clientKey"`
@@ -265,7 +265,10 @@ func (r *RabbitMQ) parseMetadata(meta bindings.Metadata) error {
 		ReconnectWait: defaultReconnectWait,
 	}
 
-	metadata.DecodeMetadata(meta.Properties, &m)
+	decodeErr := kitmd.DecodeMetadata(meta.Properties, &m)
+	if decodeErr != nil {
+		return fmt.Errorf("failed to decode metadata: %w", decodeErr)
+	}
 
 	if m.Host == "" {
 		return errors.New("missing host address")

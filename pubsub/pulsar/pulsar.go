@@ -30,10 +30,11 @@ import (
 	"github.com/hamba/avro/v2"
 	lru "github.com/hashicorp/golang-lru/v2"
 
-	"github.com/dapr/components-contrib/internal/authentication/oauth2"
+	"github.com/dapr/components-contrib/common/authentication/oauth2"
 	"github.com/dapr/components-contrib/metadata"
 	"github.com/dapr/components-contrib/pubsub"
 	"github.com/dapr/kit/logger"
+	kitmd "github.com/dapr/kit/metadata"
 )
 
 const (
@@ -77,6 +78,10 @@ const (
 	defaultMaxBatchSize = 128 * 1024
 	// defaultRedeliveryDelay init default for redelivery delay.
 	defaultRedeliveryDelay = 30 * time.Second
+	// defaultConcurrency controls the number of concurrent messages sent to the app.
+	defaultConcurrency = 100
+	// defaultReceiverQueueSize controls the number of messages the pulsar sdk pulls before dapr explicitly consumes the messages.
+	defaultReceiverQueueSize = 1000
 
 	subscribeTypeKey = "subscribeType"
 
@@ -121,14 +126,22 @@ func parsePulsarMetadata(meta pubsub.Metadata) (*pulsarMetadata, error) {
 		BatchingMaxMessages:     defaultMaxMessages,
 		BatchingMaxSize:         defaultMaxBatchSize,
 		RedeliveryDelay:         defaultRedeliveryDelay,
+		MaxConcurrentHandlers:   defaultConcurrency,
+		ReceiverQueueSize:       defaultReceiverQueueSize,
 	}
 
-	if err := metadata.DecodeMetadata(meta.Properties, &m); err != nil {
+	if err := kitmd.DecodeMetadata(meta.Properties, &m); err != nil {
 		return nil, err
 	}
 
 	if m.Host == "" {
 		return nil, errors.New("pulsar error: missing pulsar host")
+	}
+
+	var err error
+	m.SubscriptionType, err = parseSubscriptionType(meta.Properties[subscribeTypeKey])
+	if err != nil {
+		return nil, errors.New("invalid subscription type. Accepted values are `exclusive`, `shared`, `failover` and `key_shared`")
 	}
 
 	for k, v := range meta.Properties {
@@ -163,10 +176,8 @@ func (p *Pulsar) Init(ctx context.Context, metadata pubsub.Metadata) error {
 		return err
 	}
 	pulsarURL := m.Host
-	if !strings.HasPrefix(m.Host, "http://") &&
-		!strings.HasPrefix(m.Host, "https://") {
-		pulsarURL = fmt.Sprintf("%s%s", pulsarPrefix, m.Host)
-	}
+
+	pulsarURL = sanitiseURL(pulsarURL)
 	options := pulsar.ClientOptions{
 		URL:                        pulsarURL,
 		OperationTimeout:           30 * time.Second,
@@ -208,7 +219,7 @@ func (p *Pulsar) Init(ctx context.Context, metadata pubsub.Metadata) error {
 		}
 	})
 	if err != nil {
-		return fmt.Errorf("could not initialize pulsar lru cache for publisher")
+		return errors.New("could not initialize pulsar lru cache for publisher")
 	}
 	p.cache = c
 	defer p.cache.Purge()
@@ -217,6 +228,23 @@ func (p *Pulsar) Init(ctx context.Context, metadata pubsub.Metadata) error {
 	p.metadata = *m
 
 	return nil
+}
+
+func sanitiseURL(pulsarURL string) string {
+	prefixes := []string{"pulsar+ssl://", "pulsar://", "http://", "https://"}
+
+	hasPrefix := false
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(pulsarURL, prefix) {
+			hasPrefix = true
+			break
+		}
+	}
+
+	if !hasPrefix {
+		pulsarURL = fmt.Sprintf("%s%s", pulsarPrefix, pulsarURL)
+	}
+	return pulsarURL
 }
 
 func (p *Pulsar) useProducerEncryption() bool {
@@ -314,7 +342,6 @@ func parsePublishMetadata(req *pubsub.PublishRequest, schema schemaMetadata) (
 	case jsonProtocol:
 		var obj interface{}
 		err = json.Unmarshal(req.Data, &obj)
-
 		if err != nil {
 			return nil, err
 		}
@@ -328,7 +355,6 @@ func parsePublishMetadata(req *pubsub.PublishRequest, schema schemaMetadata) (
 		}
 
 		err = avro.Unmarshal(avroSchema, req.Data, &obj)
-
 		if err != nil {
 			return nil, err
 		}
@@ -365,11 +391,22 @@ func parsePublishMetadata(req *pubsub.PublishRequest, schema schemaMetadata) (
 	return msg, nil
 }
 
-// default: shared
-func getSubscribeType(metadata map[string]string) pulsar.SubscriptionType {
+func parseSubscriptionType(in string) (string, error) {
+	subsType := strings.ToLower(in)
+	switch subsType {
+	case subscribeTypeExclusive, subscribeTypeFailover, subscribeTypeShared, subscribeTypeKeyShared:
+		return subsType, nil
+	case "":
+		return subscribeTypeShared, nil
+	default:
+		return "", fmt.Errorf("invalid subscription type: %s", subsType)
+	}
+}
+
+// getSubscribeType doesn't do extra validations, because they were done in parseSubscriptionType.
+func getSubscribeType(subsTypeStr string) pulsar.SubscriptionType {
 	var subsType pulsar.SubscriptionType
 
-	subsTypeStr := strings.ToLower(metadata[subscribeTypeKey])
 	switch subsTypeStr {
 	case subscribeTypeExclusive:
 		subsType = pulsar.Exclusive
@@ -379,8 +416,6 @@ func getSubscribeType(metadata map[string]string) pulsar.SubscriptionType {
 		subsType = pulsar.Shared
 	case subscribeTypeKeyShared:
 		subsType = pulsar.KeyShared
-	default:
-		subsType = pulsar.Shared
 	}
 
 	return subsType
@@ -391,16 +426,29 @@ func (p *Pulsar) Subscribe(ctx context.Context, req pubsub.SubscribeRequest, han
 		return errors.New("component is closed")
 	}
 
-	channel := make(chan pulsar.ConsumerMessage, 100)
+	channel := make(chan pulsar.ConsumerMessage, p.metadata.MaxConcurrentHandlers)
 
 	topic := p.formatTopic(req.Topic)
+
+	subscribeType := p.metadata.SubscriptionType
+	if s, exists := req.Metadata[subscribeTypeKey]; exists {
+		subscribeType = s
+	}
 
 	options := pulsar.ConsumerOptions{
 		Topic:               topic,
 		SubscriptionName:    p.metadata.ConsumerID,
-		Type:                getSubscribeType(req.Metadata),
+		Type:                getSubscribeType(subscribeType),
 		MessageChannel:      channel,
 		NackRedeliveryDelay: p.metadata.RedeliveryDelay,
+		ReceiverQueueSize:   p.metadata.ReceiverQueueSize,
+	}
+
+	// Handle KeySharedPolicy for key_shared subscription type
+	if options.Type == pulsar.KeyShared {
+		options.KeySharedPolicy = &pulsar.KeySharedPolicy{
+			Mode: pulsar.KeySharedPolicyModeAutoSplit,
+		}
 	}
 
 	if p.useConsumerEncryption() {
@@ -424,6 +472,7 @@ func (p *Pulsar) Subscribe(ctx context.Context, req pubsub.SubscribeRequest, han
 		p.logger.Debugf("Could not subscribe to %s, full topic name in pulsar is %s", req.Topic, topic)
 		return err
 	}
+	p.logger.Debugf("Subscribed to '%s'(%s) with type '%s'", req.Topic, topic, subscribeType)
 
 	p.wg.Add(2)
 	listenCtx, cancel := context.WithCancel(ctx)

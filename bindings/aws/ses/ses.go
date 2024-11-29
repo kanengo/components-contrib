@@ -15,20 +15,20 @@ package ses
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
-
-	awsAuth "github.com/dapr/components-contrib/internal/authentication/aws"
-
 	"github.com/aws/aws-sdk-go/service/ses"
 
 	"github.com/dapr/components-contrib/bindings"
+	awsAuth "github.com/dapr/components-contrib/common/authentication/aws"
 	contribMetadata "github.com/dapr/components-contrib/metadata"
 	"github.com/dapr/kit/logger"
+	kitmd "github.com/dapr/kit/metadata"
 )
 
 const (
@@ -38,9 +38,9 @@ const (
 
 // AWSSES is an AWS SNS binding.
 type AWSSES struct {
-	metadata *sesMetadata
-	logger   logger.Logger
-	svc      *ses.SES
+	authProvider awsAuth.Provider
+	metadata     *sesMetadata
+	logger       logger.Logger
 }
 
 type sesMetadata struct {
@@ -61,19 +61,29 @@ func NewAWSSES(logger logger.Logger) bindings.OutputBinding {
 }
 
 // Init does metadata parsing.
-func (a *AWSSES) Init(_ context.Context, metadata bindings.Metadata) error {
+func (a *AWSSES) Init(ctx context.Context, metadata bindings.Metadata) error {
 	// Parse input metadata
-	meta, err := a.parseMetadata(metadata)
+	m, err := a.parseMetadata(metadata)
 	if err != nil {
 		return err
 	}
 
-	svc, err := a.getClient(meta)
+	a.metadata = m
+
+	opts := awsAuth.Options{
+		Logger:       a.logger,
+		Properties:   metadata.Properties,
+		Region:       m.Region,
+		AccessKey:    m.AccessKey,
+		SecretKey:    m.SecretKey,
+		SessionToken: "",
+	}
+	// extra configs needed per component type
+	provider, err := awsAuth.NewProvider(ctx, opts, awsAuth.GetConfig(opts))
 	if err != nil {
 		return err
 	}
-	a.metadata = meta
-	a.svc = svc
+	a.authProvider = provider
 
 	return nil
 }
@@ -84,7 +94,7 @@ func (a *AWSSES) Operations() []bindings.OperationKind {
 
 func (a *AWSSES) parseMetadata(meta bindings.Metadata) (*sesMetadata, error) {
 	m := sesMetadata{}
-	contribMetadata.DecodeMetadata(meta.Properties, &m)
+	kitmd.DecodeMetadata(meta.Properties, &m)
 
 	return &m, nil
 }
@@ -93,13 +103,13 @@ func (a *AWSSES) Invoke(ctx context.Context, req *bindings.InvokeRequest) (*bind
 	metadata := a.metadata.mergeWithRequestMetadata(req)
 
 	if metadata.EmailFrom == "" {
-		return nil, fmt.Errorf("SES binding error: emailFrom property not supplied in configuration- or request-metadata")
+		return nil, errors.New("SES binding error: emailFrom property not supplied in configuration- or request-metadata")
 	}
 	if metadata.EmailTo == "" {
-		return nil, fmt.Errorf("SES binding error: emailTo property not supplied in configuration- or request-metadata")
+		return nil, errors.New("SES binding error: emailTo property not supplied in configuration- or request-metadata")
 	}
 	if metadata.Subject == "" {
-		return nil, fmt.Errorf("SES binding error: subject property not supplied in configuration- or request-metadata")
+		return nil, errors.New("SES binding error: subject property not supplied in configuration- or request-metadata")
 	}
 
 	body, err := strconv.Unquote(string(req.Data))
@@ -141,7 +151,7 @@ func (a *AWSSES) Invoke(ctx context.Context, req *bindings.InvokeRequest) (*bind
 	}
 
 	// Attempt to send the email.
-	result, err := a.svc.SendEmail(input)
+	result, err := a.authProvider.Ses().Ses.SendEmail(input)
 	if err != nil {
 		return nil, fmt.Errorf("SES binding error. Sending email failed: %w", err)
 	}
@@ -154,20 +164,8 @@ func (a *AWSSES) Invoke(ctx context.Context, req *bindings.InvokeRequest) (*bind
 // Helper to merge config and request metadata.
 func (metadata sesMetadata) mergeWithRequestMetadata(req *bindings.InvokeRequest) sesMetadata {
 	merged := metadata
-	contribMetadata.DecodeMetadata(req.Metadata, &merged)
+	kitmd.DecodeMetadata(req.Metadata, &merged)
 	return merged
-}
-
-func (a *AWSSES) getClient(metadata *sesMetadata) (*ses.SES, error) {
-	sess, err := awsAuth.GetClient(metadata.AccessKey, metadata.SecretKey, metadata.SessionToken, metadata.Region, "")
-	if err != nil {
-		return nil, fmt.Errorf("SES binding error: error creating AWS session %w", err)
-	}
-
-	// Create an SES instance
-	svc := ses.New(sess)
-
-	return svc, nil
 }
 
 // GetComponentMetadata returns the metadata of the component.
@@ -175,4 +173,11 @@ func (a *AWSSES) GetComponentMetadata() (metadataInfo contribMetadata.MetadataMa
 	metadataStruct := sesMetadata{}
 	contribMetadata.GetMetadataInfoFromStructType(reflect.TypeOf(metadataStruct), &metadataInfo, contribMetadata.BindingType)
 	return
+}
+
+func (a *AWSSES) Close() error {
+	if a.authProvider != nil {
+		return a.authProvider.Close()
+	}
+	return nil
 }

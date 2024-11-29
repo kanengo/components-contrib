@@ -15,10 +15,11 @@ package ssm
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	ssm "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ssm/v20190923"
 
 	"github.com/dapr/components-contrib/secretstores"
@@ -76,17 +77,17 @@ func (m *mockedSsmSecretStoreReturnError) ListSecretsWithContext(ctx context.Con
 }
 
 func (m *mockedSsmSecretStoreReturnError) GetSecretValueWithContext(ctx context.Context, request *ssm.GetSecretValueRequest) (*ssm.GetSecretValueResponse, error) {
-	return nil, fmt.Errorf("mocked error")
+	return nil, errors.New("mocked error")
 }
 
 type mockedSsmSecretStoreBothReturnError struct{}
 
 func (m *mockedSsmSecretStoreBothReturnError) ListSecretsWithContext(ctx context.Context, request *ssm.ListSecretsRequest) (*ssm.ListSecretsResponse, error) {
-	return nil, fmt.Errorf("mocked error")
+	return nil, errors.New("mocked error")
 }
 
 func (m *mockedSsmSecretStoreBothReturnError) GetSecretValueWithContext(ctx context.Context, request *ssm.GetSecretValueRequest) (*ssm.GetSecretValueResponse, error) {
-	return nil, fmt.Errorf("mocked error")
+	return nil, errors.New("mocked error")
 }
 
 func TestGetSecret(t *testing.T) {
@@ -103,7 +104,7 @@ func TestGetSecret(t *testing.T) {
 		}
 
 		resp, e := c.GetSecret(context.Background(), req)
-		assert.Nil(t, e)
+		require.NoError(t, e)
 		assert.Equal(t, secretValue, resp.Data[req.Name])
 	})
 
@@ -118,7 +119,7 @@ func TestGetSecret(t *testing.T) {
 		}
 
 		_, e := c.GetSecret(context.Background(), req)
-		assert.NotNil(t, e)
+		require.Error(t, e)
 	})
 }
 
@@ -137,7 +138,7 @@ func TestBulkGetSecret(t *testing.T) {
 			},
 		}
 		resp, e := c.BulkGetSecret(context.Background(), req)
-		assert.Nil(t, e)
+		require.NoError(t, e)
 		assert.Equal(t, expectedSecrets, resp.Data)
 	})
 
@@ -149,7 +150,7 @@ func TestBulkGetSecret(t *testing.T) {
 
 			req := secretstores.BulkGetSecretRequest{}
 			_, e := c.BulkGetSecret(context.Background(), req)
-			assert.NotNil(t, e)
+			require.Error(t, e)
 		})
 
 		t.Run("with failed to retrieve the secret", func(t *testing.T) {
@@ -159,7 +160,7 @@ func TestBulkGetSecret(t *testing.T) {
 
 			req := secretstores.BulkGetSecretRequest{}
 			_, e := c.BulkGetSecret(context.Background(), req)
-			assert.NotNil(t, e)
+			require.Error(t, e)
 		})
 	})
 }

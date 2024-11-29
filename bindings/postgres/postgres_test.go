@@ -15,12 +15,14 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/dapr/components-contrib/bindings"
 	"github.com/dapr/components-contrib/metadata"
@@ -44,7 +46,7 @@ func TestOperations(t *testing.T) {
 		b := NewPostgres(nil)
 		assert.NotNil(t, b)
 		l := b.Operations()
-		assert.Equal(t, 3, len(l))
+		assert.Len(t, l, 3)
 	})
 }
 
@@ -60,6 +62,10 @@ func TestPostgresIntegration(t *testing.T) {
 	if url == "" {
 		t.SkipNow()
 	}
+
+	t.Run("Test init configurations", func(t *testing.T) {
+		testInitConfiguration(t, url)
+	})
 
 	// live DB test
 	b := NewPostgres(logger.NewLogger("test")).(*Postgres)
@@ -86,7 +92,7 @@ func TestPostgresIntegration(t *testing.T) {
 	})
 
 	t.Run("Invoke insert", func(t *testing.T) {
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			req.Metadata[commandSQLKey] = fmt.Sprintf(testInsert, i, i, time.Now().Format(time.RFC3339))
 			res, err := b.Invoke(ctx, req)
 			assertResponse(t, res, err)
@@ -94,7 +100,7 @@ func TestPostgresIntegration(t *testing.T) {
 	})
 
 	t.Run("Invoke update", func(t *testing.T) {
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			req.Metadata[commandSQLKey] = fmt.Sprintf(testUpdate, time.Now().Format(time.RFC3339), i)
 			res, err := b.Invoke(ctx, req)
 			assertResponse(t, res, err)
@@ -121,17 +127,57 @@ func TestPostgresIntegration(t *testing.T) {
 		req.Metadata = nil
 		req.Data = nil
 		_, err := b.Invoke(ctx, req)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	})
 
 	t.Run("Close", func(t *testing.T) {
 		err := b.Close()
-		assert.NoError(t, err, "expected no error closing output binding")
+		require.NoError(t, err, "expected no error closing output binding")
 	})
 }
 
+// testInitConfiguration tests valid and invalid config settings.
+func testInitConfiguration(t *testing.T, connectionString string) {
+	logger := logger.NewLogger("test")
+	tests := []struct {
+		name        string
+		props       map[string]string
+		expectedErr error
+	}{
+		{
+			name:        "Empty",
+			props:       map[string]string{},
+			expectedErr: errors.New("missing connection string"),
+		},
+		{
+			name:        "Valid connection string",
+			props:       map[string]string{"connectionString": connectionString},
+			expectedErr: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := NewPostgres(logger).(*Postgres)
+			defer p.Close()
+
+			metadata := bindings.Metadata{
+				Base: metadata.Base{Properties: tt.props},
+			}
+
+			err := p.Init(context.Background(), metadata)
+			if tt.expectedErr == nil {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Equal(t, tt.expectedErr, err)
+			}
+		})
+	}
+}
+
 func assertResponse(t *testing.T, res *bindings.InvokeResponse, err error) {
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.NotNil(t, res)
 	assert.NotNil(t, res.Metadata)
 }

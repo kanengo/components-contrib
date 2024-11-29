@@ -20,12 +20,13 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ssm"
-	"github.com/aws/aws-sdk-go/service/ssm/ssmiface"
 
-	awsAuth "github.com/dapr/components-contrib/internal/authentication/aws"
+	awsAuth "github.com/dapr/components-contrib/common/authentication/aws"
 	"github.com/dapr/components-contrib/metadata"
 	"github.com/dapr/components-contrib/secretstores"
 	"github.com/dapr/kit/logger"
+	kitmd "github.com/dapr/kit/metadata"
+	"github.com/dapr/kit/ptr"
 )
 
 // Constant literals.
@@ -41,32 +42,43 @@ func NewParameterStore(logger logger.Logger) secretstores.SecretStore {
 }
 
 type ParameterStoreMetaData struct {
-	Region       string `json:"region"`
+	// Ignored by metadata parser because included in built-in authentication profile
 	AccessKey    string `json:"accessKey" mapstructure:"accessKey" mdignore:"true"`
 	SecretKey    string `json:"secretKey" mapstructure:"secretKey" mdignore:"true"`
-	SessionToken string `json:"sessionToken"`
-	Prefix       string `json:"prefix"`
+	SessionToken string `json:"sessionToken" mapstructure:"sessionToken" mdignore:"true"`
+
+	Region string `json:"region" mapstructure:"region" mapstructurealiases:"awsRegion" mdignore:"true"`
+	Prefix string `json:"prefix"`
 }
 
 type ssmSecretStore struct {
-	client ssmiface.SSMAPI
-	prefix string
-	logger logger.Logger
+	authProvider awsAuth.Provider
+	prefix       string
+	logger       logger.Logger
 }
 
-// Init creates a AWS secret manager client.
-func (s *ssmSecretStore) Init(_ context.Context, metadata secretstores.Metadata) error {
-	meta, err := s.getSecretManagerMetadata(metadata)
+// Init creates an AWS secret manager client.
+func (s *ssmSecretStore) Init(ctx context.Context, metadata secretstores.Metadata) error {
+	m, err := s.getSecretManagerMetadata(metadata)
 	if err != nil {
 		return err
 	}
 
-	client, err := s.getClient(meta)
+	opts := awsAuth.Options{
+		Logger:       s.logger,
+		Properties:   metadata.Properties,
+		Region:       m.Region,
+		AccessKey:    m.AccessKey,
+		SecretKey:    m.SecretKey,
+		SessionToken: "",
+	}
+	// extra configs needed per component type
+	provider, err := awsAuth.NewProvider(ctx, opts, awsAuth.GetConfig(opts))
 	if err != nil {
 		return err
 	}
-	s.client = client
-	s.prefix = meta.Prefix
+	s.authProvider = provider
+	s.prefix = m.Prefix
 
 	return nil
 }
@@ -81,9 +93,9 @@ func (s *ssmSecretStore) GetSecret(ctx context.Context, req secretstores.GetSecr
 		name = fmt.Sprintf("%s:%s", req.Name, versionID)
 	}
 
-	output, err := s.client.GetParameterWithContext(ctx, &ssm.GetParameterInput{
-		Name:           aws.String(s.prefix + name),
-		WithDecryption: aws.Bool(true),
+	output, err := s.authProvider.ParameterStore().Store.GetParameterWithContext(ctx, &ssm.GetParameterInput{
+		Name:           ptr.Of(s.prefix + name),
+		WithDecryption: ptr.Of(true),
 	})
 	if err != nil {
 		return secretstores.GetSecretResponse{Data: nil}, fmt.Errorf("couldn't get secret: %s", err)
@@ -121,7 +133,7 @@ func (s *ssmSecretStore) BulkGetSecret(ctx context.Context, req secretstores.Bul
 	}
 
 	for search {
-		output, err := s.client.DescribeParametersWithContext(ctx, &ssm.DescribeParametersInput{
+		output, err := s.authProvider.ParameterStore().Store.DescribeParametersWithContext(ctx, &ssm.DescribeParametersInput{
 			MaxResults:       nil,
 			NextToken:        nextToken,
 			ParameterFilters: filters,
@@ -131,7 +143,7 @@ func (s *ssmSecretStore) BulkGetSecret(ctx context.Context, req secretstores.Bul
 		}
 
 		for _, entry := range output.Parameters {
-			params, err := s.client.GetParameterWithContext(ctx, &ssm.GetParameterInput{
+			params, err := s.authProvider.ParameterStore().Store.GetParameterWithContext(ctx, &ssm.GetParameterInput{
 				Name:           entry.Name,
 				WithDecryption: aws.Bool(true),
 			})
@@ -152,18 +164,9 @@ func (s *ssmSecretStore) BulkGetSecret(ctx context.Context, req secretstores.Bul
 	return resp, nil
 }
 
-func (s *ssmSecretStore) getClient(metadata *ParameterStoreMetaData) (*ssm.SSM, error) {
-	sess, err := awsAuth.GetClient(metadata.AccessKey, metadata.SecretKey, metadata.SessionToken, metadata.Region, "")
-	if err != nil {
-		return nil, err
-	}
-
-	return ssm.New(sess), nil
-}
-
 func (s *ssmSecretStore) getSecretManagerMetadata(spec secretstores.Metadata) (*ParameterStoreMetaData, error) {
 	meta := ParameterStoreMetaData{}
-	err := metadata.DecodeMetadata(spec.Properties, &meta)
+	err := kitmd.DecodeMetadata(spec.Properties, &meta)
 	return &meta, err
 }
 
@@ -176,4 +179,11 @@ func (s *ssmSecretStore) GetComponentMetadata() (metadataInfo metadata.MetadataM
 	metadataStruct := ParameterStoreMetaData{}
 	metadata.GetMetadataInfoFromStructType(reflect.TypeOf(metadataStruct), &metadataInfo, metadata.SecretStoreType)
 	return
+}
+
+func (s *ssmSecretStore) Close() error {
+	if s.authProvider != nil {
+		return s.authProvider.Close()
+	}
+	return nil
 }

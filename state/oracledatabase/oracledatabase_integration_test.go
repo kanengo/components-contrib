@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"testing"
 	"time"
@@ -69,7 +68,7 @@ func TestOracleDatabaseIntegration(t *testing.T) {
 
 	ods := NewOracleDatabaseStateStore(logger.NewLogger("test"))
 	t.Cleanup(func() {
-		defer ods.(io.Closer).Close()
+		defer ods.Close()
 	})
 
 	if initerror := ods.Init(context.Background(), metadata); initerror != nil {
@@ -200,7 +199,7 @@ func testCreateTable(t *testing.T, dba *oracleDatabaseAccess) {
 }
 
 func dropTable(t *testing.T, db *sql.DB, tableName string) {
-	_, err := db.Exec(fmt.Sprintf("DROP TABLE %s", tableName))
+	_, err := db.Exec("DROP TABLE " + tableName)
 	require.NoError(t, err)
 }
 
@@ -214,9 +213,9 @@ func deleteItemThatDoesNotExist(t *testing.T, ods state.Store) {
 }
 
 func multiWithSetOnly(t *testing.T, ods state.Store) {
-	var operations []state.TransactionalStateOperation
-	var setRequests []state.SetRequest
-	for i := 0; i < 3; i++ {
+	var operations []state.TransactionalStateOperation //nolint:prealloc
+	var setRequests []state.SetRequest                 //nolint:prealloc
+	for range 3 {
 		req := state.SetRequest{
 			Key:   randomKey(),
 			Value: randomJSON(),
@@ -239,9 +238,9 @@ func multiWithSetOnly(t *testing.T, ods state.Store) {
 }
 
 func multiWithDeleteOnly(t *testing.T, ods state.Store) {
-	var operations []state.TransactionalStateOperation
-	var deleteRequests []state.DeleteRequest
-	for i := 0; i < 3; i++ {
+	var operations []state.TransactionalStateOperation //nolint:prealloc
+	var deleteRequests []state.DeleteRequest           //nolint:prealloc
+	for range 3 {
 		req := state.DeleteRequest{Key: randomKey()}
 
 		// Add the item to the database.
@@ -266,9 +265,9 @@ func multiWithDeleteOnly(t *testing.T, ods state.Store) {
 }
 
 func multiWithDeleteAndSet(t *testing.T, ods state.Store) {
-	var operations []state.TransactionalStateOperation
-	var deleteRequests []state.DeleteRequest
-	for i := 0; i < 3; i++ {
+	var operations []state.TransactionalStateOperation //nolint:prealloc
+	var deleteRequests []state.DeleteRequest           //nolint:prealloc
+	for range 3 {
 		req := state.DeleteRequest{Key: randomKey()}
 
 		// Add the item to the database.
@@ -282,8 +281,8 @@ func multiWithDeleteAndSet(t *testing.T, ods state.Store) {
 	}
 
 	// Create the set requests.
-	var setRequests []state.SetRequest
-	for i := 0; i < 3; i++ {
+	var setRequests []state.SetRequest //nolint:prealloc
+	for range 3 {
 		req := state.SetRequest{
 			Key:   randomKey(),
 			Value: randomJSON(),
@@ -323,7 +322,7 @@ func deleteWithInvalidEtagFails(t *testing.T, ods state.Store) {
 		},
 	}
 	err := ods.Delete(context.Background(), deleteReq)
-	assert.Error(t, err, "Deleting an item with the wrong etag while enforcing FirstWrite policy should fail")
+	require.Error(t, err, "Deleting an item with the wrong etag while enforcing FirstWrite policy should fail")
 }
 
 func deleteWithNoKeyFails(t *testing.T, ods state.Store) {
@@ -331,7 +330,7 @@ func deleteWithNoKeyFails(t *testing.T, ods state.Store) {
 		Key: "",
 	}
 	err := ods.Delete(context.Background(), deleteReq)
-	assert.Error(t, err)
+	require.Error(t, err)
 }
 
 // newItemWithEtagFails creates a new item and also supplies a non existent ETag and requests FirstWrite, which is invalid - expect failure.
@@ -349,7 +348,7 @@ func newItemWithEtagFails(t *testing.T, ods state.Store) {
 	}
 
 	err := ods.Set(context.Background(), setReq)
-	assert.Error(t, err)
+	require.Error(t, err)
 }
 
 func updateWithOldEtagFails(t *testing.T, ods state.Store) {
@@ -379,7 +378,7 @@ func updateWithOldEtagFails(t *testing.T, ods state.Store) {
 		},
 	}
 	err := ods.Set(context.Background(), setReq)
-	assert.Error(t, err)
+	require.Error(t, err)
 }
 
 func updateAndDeleteWithEtagSucceeds(t *testing.T, ods state.Store) {
@@ -440,7 +439,7 @@ func getItemWithNoKey(t *testing.T, ods state.Store) {
 	}
 
 	response, getErr := ods.Get(context.Background(), getReq)
-	assert.NotNil(t, getErr)
+	require.Error(t, getErr)
 	assert.Nil(t, response)
 }
 
@@ -496,7 +495,8 @@ func setTTLUpdatesExpiry(t *testing.T, ods state.Store) {
 	require.NoError(t, err)
 	assert.Contains(t, resp.Metadata, "ttlExpireTime")
 	expireTime, err := time.Parse(time.RFC3339, resp.Metadata["ttlExpireTime"])
-	_ = assert.NoError(t, err) && assert.InDelta(t, time.Now().Add(time.Second*1000).Unix(), expireTime.Unix(), 10)
+	require.NoError(t, err)
+	assert.InDelta(t, time.Now().Add(time.Second*1000).Unix(), expireTime.Unix(), 10)
 
 	deleteItem(t, ods, key, nil)
 }
@@ -528,7 +528,7 @@ func setNoTTLUpdatesExpiry(t *testing.T, ods state.Store) {
 	require.NoError(t, err)
 	assert.NotContains(t, resp.Metadata, "ttlExpireTime")
 
-	assert.True(t, !expirationTime.Valid, "Expiration Time should not have a value after first being set with TTL value and then being set without TTL value")
+	assert.False(t, expirationTime.Valid, "Expiration Time should not have a value after first being set with TTL value and then being set without TTL value")
 	deleteItem(t, ods, key, nil)
 }
 
@@ -552,7 +552,7 @@ func expiredStateCannotBeRead(t *testing.T, ods state.Store) {
 	time.Sleep(time.Second * time.Duration(2))
 	getResponse, err := ods.Get(context.Background(), &state.GetRequest{Key: key})
 	assert.Equal(t, &state.GetResponse{}, getResponse, "Response must be empty")
-	assert.NoError(t, err, "Expired element must not be treated as error")
+	require.NoError(t, err, "Expired element must not be treated as error")
 
 	deleteItem(t, ods, key, nil)
 }
@@ -575,7 +575,7 @@ func unexpiredStateCanBeRead(t *testing.T, ods state.Store) {
 	require.NoError(t, err)
 	_, getValue := getItem(t, ods, key)
 	assert.Equal(t, value.Color, getValue.Color, "Response must be as set")
-	assert.NoError(t, err, "Unexpired element with future expiration time must not be treated as error")
+	require.NoError(t, err, "Unexpired element with future expiration time must not be treated as error")
 
 	deleteItem(t, ods, key, nil)
 }
@@ -586,7 +586,7 @@ func setItemWithNoKey(t *testing.T, ods state.Store) {
 	}
 
 	err := ods.Set(context.Background(), setReq)
-	assert.Error(t, err)
+	require.Error(t, err)
 }
 
 func testSetItemWithInvalidTTL(t *testing.T, ods state.Store) {
@@ -598,7 +598,7 @@ func testSetItemWithInvalidTTL(t *testing.T, ods state.Store) {
 		}),
 	}
 	err := ods.Set(context.Background(), setReq)
-	assert.Error(t, err, "Setting a value with a proper key and a incorrect TTL value should be produce an error")
+	require.Error(t, err, "Setting a value with a proper key and a incorrect TTL value should be produce an error")
 }
 
 func testSetItemWithNegativeTTL(t *testing.T, ods state.Store) {
@@ -610,7 +610,7 @@ func testSetItemWithNegativeTTL(t *testing.T, ods state.Store) {
 		}),
 	}
 	err := ods.Set(context.Background(), setReq)
-	assert.NotNil(t, err, "Setting a value with a proper key and a negative (other than -1) TTL value should be produce an error")
+	require.Error(t, err, "Setting a value with a proper key and a negative (other than -1) TTL value should be produce an error")
 }
 
 // Tests valid bulk sets and deletes.
@@ -671,7 +671,7 @@ func testInitConfiguration(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p := NewOracleDatabaseStateStore(logger)
-			defer p.(io.Closer).Close()
+			defer p.Close()
 
 			metadata := state.Metadata{
 				Base: metadata.Base{Properties: tt.props},
@@ -681,8 +681,8 @@ func testInitConfiguration(t *testing.T) {
 			if tt.expectedErr == "" {
 				require.NoError(t, err)
 			} else {
-				assert.Error(t, err)
-				assert.Equal(t, err.Error(), tt.expectedErr)
+				require.Error(t, err)
+				assert.Equal(t, tt.expectedErr, err.Error())
 			}
 		})
 	}

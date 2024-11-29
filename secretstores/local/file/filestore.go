@@ -27,6 +27,7 @@ import (
 	"github.com/dapr/components-contrib/metadata"
 	"github.com/dapr/components-contrib/secretstores"
 	"github.com/dapr/kit/logger"
+	kitmd "github.com/dapr/kit/metadata"
 )
 
 type localSecretStoreMetaData struct {
@@ -195,7 +196,7 @@ func (j *localSecretStore) visitPrimitive(context string) error {
 }
 
 func (j *localSecretStore) visitArray(array []interface{}) error {
-	for i := 0; i < len(array); i++ {
+	for i := range array {
 		j.enterContext(strconv.Itoa(i))
 		err := j.visitProperty(array[i])
 		if err != nil {
@@ -237,13 +238,13 @@ func (j *localSecretStore) combine(values []string) string {
 
 func (j *localSecretStore) getLocalSecretStoreMetadata(spec secretstores.Metadata) (*localSecretStoreMetaData, error) {
 	var meta localSecretStoreMetaData
-	err := metadata.DecodeMetadata(spec.Properties, &meta)
+	err := kitmd.DecodeMetadata(spec.Properties, &meta)
 	if err != nil {
 		return nil, err
 	}
 
 	if meta.SecretsFile == "" {
-		return nil, fmt.Errorf("missing local secrets file in metadata")
+		return nil, errors.New("missing local secrets file in metadata")
 	}
 
 	return &meta, nil
@@ -281,4 +282,8 @@ func (j *localSecretStore) GetComponentMetadata() (metadataInfo metadata.Metadat
 	metadataStruct := localSecretStoreMetaData{}
 	metadata.GetMetadataInfoFromStructType(reflect.TypeOf(metadataStruct), &metadataInfo, metadata.SecretStoreType)
 	return
+}
+
+func (j *localSecretStore) Close() error {
+	return nil
 }

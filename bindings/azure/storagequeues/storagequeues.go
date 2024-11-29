@@ -28,9 +28,10 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azqueue"
 
 	"github.com/dapr/components-contrib/bindings"
-	azauth "github.com/dapr/components-contrib/internal/authentication/azure"
+	azauth "github.com/dapr/components-contrib/common/authentication/azure"
 	contribMetadata "github.com/dapr/components-contrib/metadata"
 	"github.com/dapr/kit/logger"
+	kitmd "github.com/dapr/kit/metadata"
 	"github.com/dapr/kit/ptr"
 )
 
@@ -219,7 +220,7 @@ func (d *AzureQueueHelper) Read(ctx context.Context, consumer *consumer) error {
 		}
 		return nil
 	} else {
-		return fmt.Errorf("could not delete message from queue: message ID or pop receipt is nil")
+		return errors.New("could not delete message from queue: message ID or pop receipt is nil")
 	}
 }
 
@@ -254,7 +255,7 @@ type storageQueuesMetadata struct {
 	DecodeBase64      bool
 	EncodeBase64      bool
 	PollingInterval   time.Duration  `mapstructure:"pollingInterval"`
-	TTL               *time.Duration `mapstructure:"ttlInSeconds"`
+	TTL               *time.Duration `mapstructure:"ttl" mapstructurealiases:"ttlInSeconds"`
 	VisibilityTimeout *time.Duration
 }
 
@@ -292,7 +293,10 @@ func parseMetadata(meta bindings.Metadata) (*storageQueuesMetadata, error) {
 		PollingInterval:   defaultPollingInterval,
 		VisibilityTimeout: ptr.Of(defaultVisibilityTimeout),
 	}
-	contribMetadata.DecodeMetadata(meta.Properties, &m)
+	err := kitmd.DecodeMetadata(meta.Properties, &m)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode metadata: %w", err)
+	}
 
 	if val, ok := contribMetadata.GetMetadataProperty(meta.Properties, azauth.MetadataKeys["StorageAccountName"]...); ok && val != "" {
 		m.AccountName = val
@@ -324,6 +328,8 @@ func parseMetadata(meta bindings.Metadata) (*storageQueuesMetadata, error) {
 	}
 	if ok {
 		m.TTL = &ttl
+	} else {
+		m.TTL = nil
 	}
 
 	return &m, nil

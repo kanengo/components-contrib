@@ -15,8 +15,10 @@ package state
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,7 +28,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/exp/slices"
 
 	"github.com/dapr/components-contrib/contenttype"
 	"github.com/dapr/components-contrib/metadata"
@@ -37,6 +38,14 @@ import (
 )
 
 type ValueType struct {
+	Message string `json:"message"`
+}
+
+type StructType struct {
+	Product struct {
+		Value int `json:"value"`
+	} `json:"product"`
+	Status  string `json:"status"`
 	Message string `json:"message"`
 }
 
@@ -55,8 +64,10 @@ type scenario struct {
 }
 
 type queryScenario struct {
-	query   string
-	results []state.QueryItem
+	query         string
+	results       []state.QueryItem
+	metadata      map[string]string
+	partitionOnly bool
 }
 
 type TestConfig struct {
@@ -91,120 +102,139 @@ func ConformanceTests(t *testing.T, props map[string]string, statestore state.St
 
 	scenarios := []scenario{
 		{
-			key:   fmt.Sprintf("%s-int", key),
+			key:   key + "-int",
 			value: 123,
 		},
 		{
-			key:   fmt.Sprintf("%s-bool", key),
+			key:   key + "-bool",
 			value: true,
 		},
 		{
-			key:   fmt.Sprintf("%s-bytes", key),
+			key:   key + "-bytes",
 			value: []byte{0x1},
 		},
 		{
-			key:   fmt.Sprintf("%s-string-with-json", key),
+			key:   key + "-string-with-json",
 			value: `{"a":"b"}`,
 		},
 		{
-			key:   fmt.Sprintf("%s-string", key),
+			key:   key + "-string",
 			value: "hello world",
 		},
 		{
-			key:   fmt.Sprintf("%s-empty-string", key),
+			key:   key + "-empty-string",
 			value: "",
 		},
 		{
-			key:         fmt.Sprintf("%s-struct", key),
-			value:       ValueType{Message: fmt.Sprintf("test%s", key)},
+			key:         key + "-struct",
+			value:       ValueType{Message: "test" + key},
 			contentType: contenttype.JSONContentType,
 		},
 		{
-			key:         fmt.Sprintf("%s-struct-with-int", key),
+			key: key + "-struct-operations",
+			value: StructType{Product: struct {
+				Value int `json:"value"`
+			}{Value: 15}, Status: "ACTIVE", Message: key + "message"},
+			contentType: contenttype.JSONContentType,
+		},
+		{
+			key: key + "-struct-operations-inactive",
+			value: StructType{Product: struct {
+				Value int `json:"value"`
+			}{Value: 12}, Status: "INACTIVE", Message: key + "message"},
+			contentType: contenttype.JSONContentType,
+		},
+		{
+			key:         key + "-struct-2",
+			value:       ValueType{Message: key + "test"},
+			contentType: contenttype.JSONContentType,
+		},
+		{
+			key:         key + "-struct-with-int",
 			value:       intValueType{Message: 42},
 			contentType: contenttype.JSONContentType,
 		},
 		{
-			key:         fmt.Sprintf("%s-to-be-deleted", key),
+			key:         key + "-to-be-deleted",
 			value:       "to be deleted",
 			toBeDeleted: true,
 		},
 		{
-			key:      fmt.Sprintf("%s-bulk-int", key),
+			key:      key + "-bulk-int",
 			value:    123,
 			bulkOnly: true,
 		},
 		{
-			key:      fmt.Sprintf("%s-bulk-bool", key),
+			key:      key + "-bulk-bool",
 			value:    true,
 			bulkOnly: true,
 		},
 		{
-			key:      fmt.Sprintf("%s-bulk-bytes", key),
+			key:      key + "-bulk-bytes",
 			value:    []byte{0x1},
 			bulkOnly: true,
 		},
 		{
-			key:      fmt.Sprintf("%s-bulk-string", key),
+			key:      key + "-bulk-string",
 			value:    "hello world",
 			bulkOnly: true,
 		},
 		{
-			key:      fmt.Sprintf("%s-bulk-struct", key),
+			key:      key + "-bulk-struct",
 			value:    ValueType{Message: "test"},
 			bulkOnly: true,
 		},
 		{
-			key:         fmt.Sprintf("%s-bulk-to-be-deleted", key),
+			key:         key + "-bulk-to-be-deleted",
 			value:       "to be deleted",
 			toBeDeleted: true,
 			bulkOnly:    true,
 		},
 		{
-			key:         fmt.Sprintf("%s-bulk-to-be-deleted-too", key),
+			key:         key + "-bulk-to-be-deleted-too",
 			value:       "to be deleted too",
 			toBeDeleted: true,
 			bulkOnly:    true,
 		},
 		{
-			key:              fmt.Sprintf("%s-trx-int", key),
+			key:              key + "-trx-int",
 			value:            123,
 			transactionOnly:  true,
 			transactionGroup: 1,
 		},
 		{
-			key:              fmt.Sprintf("%s-trx-bool", key),
+			key:              key + "-trx-bool",
 			value:            true,
 			transactionOnly:  true,
 			transactionGroup: 1,
 		},
 		{
-			key:              fmt.Sprintf("%s-trx-bytes", key),
+			key:              key + "-trx-bytes",
 			value:            []byte{0x1},
 			transactionOnly:  true,
 			transactionGroup: 1,
 		},
 		{
-			key:              fmt.Sprintf("%s-trx-string", key),
+			key:              key + "-trx-string",
 			value:            "hello world",
 			transactionOnly:  true,
 			transactionGroup: 1,
 		},
 		{
-			key:              fmt.Sprintf("%s-trx-struct", key),
+			key:              key + "-trx-struct",
 			value:            ValueType{Message: "test"},
 			transactionOnly:  true,
 			transactionGroup: 2,
 		},
 		{
-			key:              fmt.Sprintf("%s-trx-to-be-deleted", key),
+			key:              key + "-trx-to-be-deleted",
 			value:            "to be deleted",
 			toBeDeleted:      true,
 			transactionOnly:  true,
 			transactionGroup: 1,
 		},
 		{
-			key:              fmt.Sprintf("%s-trx-to-be-deleted-too", key),
+			key:              key + "-trx-to-be-deleted-too",
 			value:            "to be deleted too",
 			toBeDeleted:      true,
 			transactionOnly:  true,
@@ -230,8 +260,136 @@ func ConformanceTests(t *testing.T, props map[string]string, statestore state.St
 			`,
 			results: []state.QueryItem{
 				{
-					Key:  fmt.Sprintf("%s-struct", key),
+					Key:  key + "-struct",
 					Data: []byte(fmt.Sprintf(`{"message":"test%s"}`, key)),
+				},
+			},
+		},
+		{
+			query: `
+			{
+				"filter": {
+					"AND": [
+						{
+							"EQ": {"message": "` + key + `message"}
+						},
+						{
+							"GTE": {"product.value": 10}
+						},
+						{
+							"LT": {"product.value": 20}
+						},
+						{
+							"NEQ": {"status": "INACTIVE"}
+						}
+					]
+				}
+			}
+			`,
+			results: []state.QueryItem{
+				{
+					Key:  key + "-struct-operations",
+					Data: []byte(fmt.Sprintf(`{"product":{"value":15}, "status":"ACTIVE","message":"%smessage"}`, key)),
+				},
+			},
+		},
+		{
+			query: `
+			{
+				"filter": {
+					"OR": [ 
+						{ 
+							"AND": [
+								{
+									"EQ": {"message": "` + key + `message"}
+								},
+								{
+									"GT": {"product.value": 11.1}
+								},
+								{
+									"EQ": {"status": "INACTIVE"}
+								}
+							]
+						},
+						{ 
+							"AND": [
+								{
+									"EQ": {"message": "` + key + `message"}
+								},
+								{
+									"LTE": {"product.value": 0.5}
+								},
+								{
+									"EQ": {"status": "ACTIVE"}
+								}
+							]
+						}
+					]
+				}
+			}
+			`,
+			results: []state.QueryItem{
+				{
+					Key:  key + "-struct-operations-inactive",
+					Data: []byte(fmt.Sprintf(`{"product":{"value":12}, "status":"INACTIVE","message":"%smessage"}`, key)),
+				},
+			},
+		},
+
+		// In CosmosDB this query uses the cross partition ( value with 2 different partitionKey <key>-struct and <key>-struct-2)
+		{
+			query: `
+			{
+				"filter": {
+					"OR": [
+						{
+							"EQ": {"message": "` + key + `test"}
+						},
+						{
+							"IN": {"message": ["test` + key + `", "dummy"]}
+						}
+					]
+				}
+			}
+			`,
+			// Return 2 item from 2 different partitionKey (<key>-struct and <key>-struct-2), for default the partitionKey is equals to key
+			results: []state.QueryItem{
+				{
+					Key:  key + "-struct",
+					Data: []byte(fmt.Sprintf(`{"message":"test%s"}`, key)),
+				},
+				{
+					Key:  key + "-struct-2",
+					Data: []byte(fmt.Sprintf(`{"message":"%stest"}`, key)),
+				},
+			},
+		},
+
+		// Test for CosmosDB (filter test with partitionOnly) this query doesn't use the cross partition ( value from 2 different partitionKey %s-struct and %s-struct-2)
+		{
+			query: `
+			{
+				"filter": {
+					"OR": [
+						{
+							"EQ": {"message": "` + key + `test"}
+						},
+						{
+							"IN": {"message": ["test` + key + `", "dummy"]}
+						}
+					]
+				}
+			}
+			`,
+			metadata: map[string]string{
+				"partitionKey": key + "-struct-2",
+			},
+			partitionOnly: true,
+			// The same query from previous test but return only item having the same partitionKey value (%s-struct-2) given in the metadata
+			results: []state.QueryItem{
+				{
+					Key:  key + "-struct-2",
+					Data: []byte(fmt.Sprintf(`{"message":"%stest"}`, key)),
 				},
 			},
 		},
@@ -241,7 +399,7 @@ func ConformanceTests(t *testing.T, props map[string]string, statestore state.St
 		err := statestore.Init(context.Background(), state.Metadata{Base: metadata.Base{
 			Properties: props,
 		}})
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	})
 
 	// Don't run more tests if init failed
@@ -252,12 +410,12 @@ func ConformanceTests(t *testing.T, props map[string]string, statestore state.St
 	t.Run("ping", func(t *testing.T) {
 		err := state.Ping(context.Background(), statestore)
 		// TODO: Ideally, all stable components should implenment ping function,
-		// so will only assert assert.NoError(t, err) finally, i.e. when current implementation
+		// so will only assert require.NoError(t, err) finally, i.e. when current implementation
 		// implements ping in existing stable components
 		if err != nil {
-			assert.EqualError(t, err, "ping is not implemented by this state store")
+			require.ErrorIs(t, err, state.ErrPingNotImplemented)
 		} else {
-			assert.NoError(t, err)
+			require.NoError(t, err)
 		}
 	})
 
@@ -273,7 +431,7 @@ func ConformanceTests(t *testing.T, props map[string]string, statestore state.St
 					req.Metadata = map[string]string{metadata.ContentType: scenario.contentType}
 				}
 				err := statestore.Set(context.Background(), req)
-				assert.NoError(t, err)
+				require.NoError(t, err)
 			}
 		}
 	})
@@ -300,10 +458,12 @@ func ConformanceTests(t *testing.T, props map[string]string, statestore state.St
 			// Check if query feature is listed
 			features := statestore.Features()
 			require.True(t, state.FeatureQueryAPI.IsPresent(features))
-
 			querier, ok := statestore.(state.Querier)
 			assert.True(t, ok, "Querier interface is not implemented")
 			for _, scenario := range queryScenarios {
+				if (scenario.partitionOnly) && (!state.FeaturePartitionKey.IsPresent(features)) {
+					break
+				}
 				t.Logf("Querying value presence for %s", scenario.query)
 				var req state.QueryRequest
 				err := json.Unmarshal([]byte(scenario.query), &req.Query)
@@ -312,15 +472,20 @@ func ConformanceTests(t *testing.T, props map[string]string, statestore state.St
 					metadata.ContentType:    contenttype.JSONContentType,
 					metadata.QueryIndexName: "qIndx",
 				}
+
+				if val, found := scenario.metadata["partitionKey"]; found {
+					req.Metadata["partitionKey"] = val
+				}
+
 				resp, err := querier.Query(context.Background(), &req)
 				require.NoError(t, err)
 				assert.Equal(t, len(scenario.results), len(resp.Results))
 				for i := range scenario.results {
 					var expected, actual interface{}
 					err = json.Unmarshal(scenario.results[i].Data, &expected)
-					assert.NoError(t, err)
+					require.NoError(t, err)
 					err = json.Unmarshal(resp.Results[i].Data, &actual)
-					assert.NoError(t, err)
+					require.NoError(t, err)
 					assert.Equal(t, scenario.results[i].Key, resp.Results[i].Key)
 					assert.Equal(t, expected, actual)
 				}
@@ -345,13 +510,13 @@ func ConformanceTests(t *testing.T, props map[string]string, statestore state.St
 					req.Metadata = map[string]string{metadata.ContentType: scenario.contentType}
 				}
 				err := statestore.Delete(context.Background(), req)
-				assert.NoError(t, err, "no error expected while deleting %s", scenario.key)
+				require.NoError(t, err, "no error expected while deleting %s", scenario.key)
 
 				t.Logf("Checking value absence for %s", scenario.key)
 				res, err := statestore.Get(context.Background(), &state.GetRequest{
 					Key: scenario.key,
 				})
-				assert.NoError(t, err, "no error expected while checking for absence for %s", scenario.key)
+				require.NoError(t, err, "no error expected while checking for absence for %s", scenario.key)
 				assert.Nil(t, res.Data, "no data expected while checking for absence for %s", scenario.key)
 			}
 		}
@@ -443,14 +608,14 @@ func ConformanceTests(t *testing.T, props map[string]string, statestore state.St
 			}
 		}
 		err := statestore.BulkDelete(context.Background(), bulk, state.BulkStoreOpts{})
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		for _, req := range bulk {
 			t.Logf("Checking value absence for %s", req.Key)
 			res, err := statestore.Get(context.Background(), &state.GetRequest{
 				Key: req.Key,
 			})
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.Nil(t, res.Data)
 		}
 	})
@@ -492,7 +657,7 @@ func ConformanceTests(t *testing.T, props map[string]string, statestore state.St
 			}
 
 			transactionStore, ok := statestore.(state.TransactionalStore)
-			assert.True(t, ok)
+			require.True(t, ok)
 			sort.Ints(transactionGroups)
 			for _, transactionGroup := range transactionGroups {
 				t.Logf("Testing transaction #%d", transactionGroup)
@@ -558,21 +723,21 @@ func ConformanceTests(t *testing.T, props map[string]string, statestore state.St
 				Value:    firstValue,
 				Metadata: partitionMetadata,
 			})
-			assert.NoError(t, err, "set request should be successful")
+			require.NoError(t, err, "set request should be successful")
 
 			// prerequisite: key2 should not be present
 			err = statestore.Delete(context.Background(), &state.DeleteRequest{
 				Key:      secondKey,
 				Metadata: partitionMetadata,
 			})
-			assert.NoError(t, err, "delete request should be successful")
+			require.NoError(t, err, "delete request should be successful")
 
 			// prerequisite: key3 should not be present
 			err = statestore.Delete(context.Background(), &state.DeleteRequest{
 				Key:      thirdKey,
 				Metadata: partitionMetadata,
 			})
-			assert.NoError(t, err, "delete request should be successful")
+			require.NoError(t, err, "delete request should be successful")
 
 			operations := []state.TransactionalStateOperation{
 				// delete an item that already exists
@@ -620,8 +785,77 @@ func ConformanceTests(t *testing.T, props map[string]string, statestore state.St
 				assert.Equal(t, v, res.Data)
 			}
 		})
+
+		t.Run("transaction-serialization-grpc-json", func(t *testing.T) {
+			features := statestore.Features()
+			// this check for exclude redis 7
+			if state.FeatureQueryAPI.IsPresent(features) {
+				json := "{\"id\":1223,\"name\":\"test\"}"
+				keyTest1 := key + "-key-grpc"
+				valueTest := []byte(json)
+				keyTest2 := key + "-key-grpc-no-json"
+
+				metadataTest1 := map[string]string{
+					"contentType": "application/json",
+				}
+
+				operations := []state.TransactionalStateOperation{
+					state.SetRequest{
+						Key:      keyTest1,
+						Value:    valueTest,
+						Metadata: metadataTest1,
+					},
+					state.SetRequest{
+						Key:   keyTest2,
+						Value: valueTest,
+					},
+				}
+
+				expected := map[string][]byte{
+					keyTest1: []byte(json),
+					keyTest2: []byte(json),
+				}
+
+				expectedMetadata := map[string]map[string]string{
+					keyTest1: metadataTest1,
+				}
+
+				// Act
+				transactionStore, ok := statestore.(state.TransactionalStore)
+				assert.True(t, ok)
+				err := transactionStore.Multi(context.Background(), &state.TransactionalStateRequest{
+					Operations: operations,
+				})
+				require.NoError(t, err)
+
+				// Assert
+				for k, v := range expected {
+					res, err := statestore.Get(context.Background(), &state.GetRequest{
+						Key:      k,
+						Metadata: expectedMetadata[k],
+					})
+					expectedValue := res.Data
+
+					// In redisjson when set the value with contentType = application/Json store the value in base64
+					if strings.HasPrefix(string(expectedValue), "\"ey") {
+						valueBase64 := strings.Trim(string(expectedValue), "\"")
+						expectedValueDecoded, _ := base64.StdEncoding.DecodeString(valueBase64)
+						require.NoError(t, err)
+						assert.Equal(t, expectedValueDecoded, v)
+					} else {
+						require.NoError(t, err)
+						assert.Equal(t, expectedValue, v)
+					}
+				}
+			}
+		})
 	} else {
-		t.Run("transactional feature not present", func(t *testing.T) {
+		t.Run("component does not implement TransactionalStore interface", func(t *testing.T) {
+			_, ok := statestore.(state.TransactionalStore)
+			require.False(t, ok)
+		})
+
+		t.Run("Transactional feature not present", func(t *testing.T) {
 			features := statestore.Features()
 			assert.False(t, state.FeatureTransactional.IsPresent(features))
 		})
@@ -672,7 +906,7 @@ func ConformanceTests(t *testing.T, props map[string]string, statestore state.St
 			}, state.BulkGetOpts{})
 			require.NoError(t, err)
 			require.Len(t, bulkRes, 3)
-			for i := 0; i < 3; i++ {
+			for i := range 3 {
 				require.NotNil(t, bulkRes[i].ETag)
 				require.NotEmpty(t, *bulkRes[i].ETag)
 				assertDataEquals(t, firstValue, bulkRes[i].Data)
@@ -762,7 +996,7 @@ func ConformanceTests(t *testing.T, props map[string]string, statestore state.St
 			}, state.BulkGetOpts{})
 			require.NoError(t, err)
 			require.Len(t, bulkRes, 2)
-			for i := 0; i < 2; i++ {
+			for i := range 2 {
 				require.NotNil(t, bulkRes[i].ETag)
 				require.NotEmpty(t, *bulkRes[i].ETag)
 				assertDataEquals(t, thirdValue, bulkRes[i].Data)
@@ -846,7 +1080,7 @@ func ConformanceTests(t *testing.T, props map[string]string, statestore state.St
 			require.NoError(t, err)
 			require.Len(t, bulkRes, 2)
 			foundKeys := []string{}
-			for i := 0; i < 2; i++ {
+			for i := range 2 {
 				require.Empty(t, bulkRes[i].Data)
 				require.Empty(t, bulkRes[i].ETag)
 				foundKeys = append(foundKeys, bulkRes[i].Key)
@@ -1219,6 +1453,109 @@ func ConformanceTests(t *testing.T, props map[string]string, statestore state.St
 			})
 		})
 	}
+
+	if config.HasOperation("delete-with-prefix") {
+		keys := map[string]bool{
+			"prefix||key1":          true,
+			"prefix||key2":          true,
+			"prefix||prefix2||key3": true,
+			"other-prefix||key1":    true,
+			"no-prefix":             true,
+		}
+		validateFn := func() func(t *testing.T) {
+			return func(t *testing.T) {
+				for key, exists := range keys {
+					res, err := statestore.Get(context.Background(), &state.GetRequest{Key: key})
+					require.NoErrorf(t, err, "Error retrieving key '%s'", key)
+					if exists {
+						require.NotEmptyf(t, res.Data, "Expected key '%s' to be not empty", key)
+					} else {
+						require.Emptyf(t, res.Data, "Expected key '%s' to be empty, but contained data: %s", key, string(res.Data))
+					}
+				}
+			}
+		}
+
+		var statestoreDeleteWithPrefix state.DeleteWithPrefix
+		t.Run("component implements DeleteWithPrefix interface", func(t *testing.T) {
+			var ok bool
+			statestoreDeleteWithPrefix, ok = statestore.(state.DeleteWithPrefix)
+			require.True(t, ok)
+		})
+
+		t.Run("DeleteWithPrefix feature present", func(t *testing.T) {
+			features := statestore.Features()
+			require.True(t, state.FeatureDeleteWithPrefix.IsPresent(features))
+		})
+
+		t.Run("set test data", func(t *testing.T) {
+			err := statestore.BulkSet(context.Background(), []state.SetRequest{
+				{Key: "prefix||key1", Value: []byte("Ovid, Metamorphoseon")},
+				{Key: "prefix||key2", Value: []byte("In nova fert animus mutatas dicere formas")},
+				{Key: "prefix||prefix2||key3", Value: []byte("corpora; di, coeptis (nam vos mutastis et illas)")},
+				{Key: "other-prefix||key1", Value: []byte("adspirate meis primaque ab origine mundi")}, // Note this still has "prefix||" but not at the start of the string
+				{Key: "no-prefix", Value: []byte("ad mea perpetuum deducite tempora carmen.")},
+			}, state.BulkStoreOpts{})
+			require.NoError(t, err)
+
+			t.Run("all keys are set", validateFn())
+		})
+
+		require.False(t, t.Failed(), "Cannot continue if previous test failed")
+
+		t.Run("delete with prefix", func(t *testing.T) {
+			res, err := statestoreDeleteWithPrefix.DeleteWithPrefix(context.Background(), state.DeleteWithPrefixRequest{
+				// Does not delete "prefix||prefix2||key3"
+				Prefix: "prefix||",
+			})
+			require.NoError(t, err)
+			assert.Equal(t, int64(2), res.Count)
+
+			keys["prefix||key1"] = false
+			keys["prefix||key2"] = false
+
+			t.Run("validate keys present", validateFn())
+		})
+
+		t.Run("delete with prefix appends ||", func(t *testing.T) {
+			res, err := statestoreDeleteWithPrefix.DeleteWithPrefix(context.Background(), state.DeleteWithPrefixRequest{
+				// Appends || automatically
+				Prefix: "other-prefix",
+			})
+			require.NoError(t, err)
+			assert.Equal(t, int64(1), res.Count)
+
+			keys["other-prefix||key1"] = false
+
+			t.Run("validate keys present", validateFn())
+		})
+
+		t.Run("error when prefix is empty", func(t *testing.T) {
+			_, err := statestoreDeleteWithPrefix.DeleteWithPrefix(context.Background(), state.DeleteWithPrefixRequest{
+				Prefix: "",
+			})
+			require.Error(t, err)
+			require.ErrorContains(t, err, "prefix is required")
+		})
+
+		t.Run("error when prefix is ||", func(t *testing.T) {
+			_, err := statestoreDeleteWithPrefix.DeleteWithPrefix(context.Background(), state.DeleteWithPrefixRequest{
+				Prefix: "||",
+			})
+			require.Error(t, err)
+			require.ErrorContains(t, err, "prefix is required")
+		})
+	} else {
+		t.Run("component does not implement DeleteWithPrefix interface", func(t *testing.T) {
+			_, ok := statestore.(state.DeleteWithPrefix)
+			require.False(t, ok)
+		})
+
+		t.Run("DeleteWithPrefix feature not present", func(t *testing.T) {
+			features := statestore.Features()
+			require.False(t, state.FeatureDeleteWithPrefix.IsPresent(features))
+		})
+	}
 }
 
 func assertEquals(t *testing.T, value any, res *state.GetResponse) {
@@ -1236,6 +1573,12 @@ func assertDataEquals(t *testing.T, expect any, actual []byte) {
 		}
 		assert.Equal(t, expect, v)
 	case ValueType:
+		// Custom type requires case mapping
+		if err := json.Unmarshal(actual, &v); err != nil {
+			assert.Failf(t, "unmarshal error", "error: %v, json: %s", err, string(actual))
+		}
+		assert.Equal(t, expect, v)
+	case StructType:
 		// Custom type requires case mapping
 		if err := json.Unmarshal(actual, &v); err != nil {
 			assert.Failf(t, "unmarshal error", "error: %v, json: %s", err, string(actual))

@@ -20,7 +20,7 @@ import (
 	"reflect"
 	"time"
 
-	rediscomponent "github.com/dapr/components-contrib/internal/component/redis"
+	rediscomponent "github.com/dapr/components-contrib/common/component/redis"
 	"github.com/dapr/components-contrib/lock"
 	contribMetadata "github.com/dapr/components-contrib/metadata"
 	"github.com/dapr/kit/logger"
@@ -50,7 +50,7 @@ func NewStandaloneRedisLock(logger logger.Logger) lock.Store {
 // Init StandaloneRedisLock.
 func (r *StandaloneRedisLock) InitLockStore(ctx context.Context, metadata lock.Metadata) (err error) {
 	// Create the client
-	r.client, r.clientSettings, err = rediscomponent.ParseClientFromProperties(metadata.Properties, contribMetadata.LockStoreType)
+	r.client, r.clientSettings, err = rediscomponent.ParseClientFromProperties(metadata.Properties, contribMetadata.LockStoreType, ctx, &r.logger)
 	if err != nil {
 		return err
 	}
@@ -85,7 +85,7 @@ func (r *StandaloneRedisLock) TryLock(ctx context.Context, req *lock.TryLockRequ
 	// Set a key if doesn't exist with an expiration time
 	nxval, err := r.client.SetNX(ctx, req.ResourceID, req.LockOwner, time.Second*time.Duration(req.ExpiryInSeconds))
 	if nxval == nil {
-		return &lock.TryLockResponse{}, fmt.Errorf("setNX returned a nil response")
+		return &lock.TryLockResponse{}, errors.New("setNX returned a nil response")
 	}
 
 	if err != nil {

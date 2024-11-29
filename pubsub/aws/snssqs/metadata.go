@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dapr/components-contrib/metadata"
 	"github.com/dapr/components-contrib/pubsub"
+	"github.com/dapr/kit/metadata"
 
 	"github.com/aws/aws-sdk-go/aws/endpoints"
 )
@@ -22,11 +22,12 @@ type snsSqsMetadata struct {
 	// aws endpoint for the component to use.
 	Endpoint string `mapstructure:"endpoint"`
 	// aws region in which SNS/SQS should create resources.
-	Region string `mapstructure:"region"`
+	// TODO: rm the alias on region in Dapr 1.17.
+	Region string `json:"region" mapstructure:"region" mapstructurealiases:"awsRegion" mdignore:"true"`
 	// aws partition in which SNS/SQS should create resources.
 	internalPartition string `mapstructure:"-"`
 	// name of the queue for this application. The is provided by the runtime as "consumerID".
-	SqsQueueName string `mapstructure:"consumerID"  mdignore:"true"`
+	SqsQueueName string `mapstructure:"consumerID" mdignore:"true"`
 	// name of the dead letter queue for this application.
 	SqsDeadLettersQueueName string `mapstructure:"sqsDeadLettersQueueName"`
 	// flag to SNS and SQS FIFO.
@@ -57,17 +58,19 @@ type snsSqsMetadata struct {
 	AccountID string `mapstructure:"accountID"`
 	// processing concurrency mode
 	ConcurrencyMode pubsub.ConcurrencyMode `mapstructure:"concurrencyMode"`
+	// limits the number of concurrent goroutines
+	ConcurrencyLimit int `mapstructure:"concurrencyLimit"`
 }
 
 func maskLeft(s string) string {
 	rs := []rune(s)
-	for i := 0; i < len(rs)-4; i++ {
+	for i := range len(rs) - 4 {
 		rs[i] = 'X'
 	}
 	return string(rs)
 }
 
-func (s *snsSqs) getSnsSqsMetatdata(meta pubsub.Metadata) (*snsSqsMetadata, error) {
+func (s *snsSqs) getSnsSqsMetadata(meta pubsub.Metadata) (*snsSqsMetadata, error) {
 	md := &snsSqsMetadata{
 		AssetsManagementTimeoutSeconds: assetsManagementDefaultTimeoutSeconds,
 		MessageVisibilityTimeout:       10,
@@ -128,6 +131,10 @@ func (s *snsSqs) getSnsSqsMetatdata(meta pubsub.Metadata) (*snsSqsMetadata, erro
 
 	if err := md.setConcurrencyMode(meta.Properties); err != nil {
 		return nil, err
+	}
+
+	if md.ConcurrencyLimit < 0 {
+		return nil, errors.New("concurrencyLimit must be greater than or equal to 0")
 	}
 
 	s.logger.Debug(md.hideDebugPrintedCredentials())

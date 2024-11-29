@@ -24,7 +24,7 @@ on:
       - 'release-*'
   pull_request:
     branches:
-      - 'master'
+      - 'main'
       - 'release-*'
 
 jobs:
@@ -44,7 +44,7 @@ jobs:
         fi
 
     - name: Check out code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
         repository: ${{ env.CHECKOUT_REPO }}
         ref: ${{ env.CHECKOUT_REF }}
@@ -97,12 +97,12 @@ jobs:
       run:
         shell: bash
 
-    needs: 
+    needs:
       - generate-matrix
 
     strategy:
       fail-fast: false # Keep running even if one component fails
-      matrix: 
+      matrix:
         include: ${{ fromJson(needs.generate-matrix.outputs.test-matrix) }}
 
     steps:
@@ -120,7 +120,7 @@ jobs:
         fi
 
     - name: Check out code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
         repository: ${{ env.CHECKOUT_REPO }}
         ref: ${{ env.CHECKOUT_REF }}
@@ -224,9 +224,10 @@ jobs:
 
     - name: Set up Go
       id: setup-go
-      uses: actions/setup-go@v3
+      uses: actions/setup-go@v4
       with:
         go-version-file: 'go.mod'
+        cache: 'false'
 
     - name: Download Go dependencies
       working-directory: ${{ env.TEST_PATH }}
@@ -253,12 +254,12 @@ jobs:
         AWS_REGION: "${{ env.AWS_REGION }}"
       run: |
         echo "Running certification tests for ${{ matrix.component }} ... "
-        echo "Source Pacakge: " ${{ matrix.source-pkg }}
+        echo "Source Package: " ${{ matrix.source-pkg }}
         export GOLANG_PROTOBUF_REGISTRATION_CONFLICT=ignore
         set +e
         gotestsum --jsonfile ${{ env.TEST_OUTPUT_FILE_PREFIX }}_certification.json \
           --junitfile ${{ env.TEST_OUTPUT_FILE_PREFIX }}_certification.xml --format standard-quiet -- \
-          -coverprofile=cover.out -covermode=set -tags=certtests -timeout=30m -coverpkg=${{ matrix.source-pkg }}
+          -coverprofile=cover.out -covermode=set  -tags=certtests,unit -timeout=30m -coverpkg=${{ matrix.source-pkg }}
         status=$?
         echo "Completed certification tests for ${{ matrix.component }} ... "
         if test $status -ne 0; then
@@ -333,7 +334,7 @@ jobs:
     name: Post-completion
     runs-on: ubuntu-22.04
     if: always()
-    needs: 
+    needs:
       - certification
       - generate-matrix
     steps:

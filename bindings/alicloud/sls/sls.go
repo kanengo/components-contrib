@@ -3,7 +3,7 @@ package sls
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"reflect"
 	"time"
 
@@ -13,6 +13,7 @@ import (
 	"github.com/dapr/components-contrib/bindings"
 	"github.com/dapr/components-contrib/metadata"
 	"github.com/dapr/kit/logger"
+	kitmd "github.com/dapr/kit/metadata"
 )
 
 type AliCloudSlsLogstorage struct {
@@ -60,16 +61,16 @@ func NewAliCloudSlsLogstorage(logger logger.Logger) bindings.OutputBinding {
 func (s *AliCloudSlsLogstorage) Invoke(ctx context.Context, req *bindings.InvokeRequest) (*bindings.InvokeResponse, error) {
 	// verify the metadata property
 	if logProject := req.Metadata["project"]; logProject == "" {
-		return nil, fmt.Errorf("SLS binding error: project property not supplied")
+		return nil, errors.New("SLS binding error: project property not supplied")
 	}
 	if logstore := req.Metadata["logstore"]; logstore == "" {
-		return nil, fmt.Errorf("SLS binding error: logstore property not supplied")
+		return nil, errors.New("SLS binding error: logstore property not supplied")
 	}
 	if topic := req.Metadata["topic"]; topic == "" {
-		return nil, fmt.Errorf("SLS binding error: topic property not supplied")
+		return nil, errors.New("SLS binding error: topic property not supplied")
 	}
 	if source := req.Metadata["source"]; source == "" {
-		return nil, fmt.Errorf("SLS binding error: source property not supplied")
+		return nil, errors.New("SLS binding error: source property not supplied")
 	}
 
 	log, err := s.parseLog(req)
@@ -95,12 +96,13 @@ func (s *AliCloudSlsLogstorage) parseLog(req *bindings.InvokeRequest) (*sls.Log,
 	if err != nil {
 		return nil, err
 	}
+	//nolint:gosec
 	return producer.GenerateLog(uint32(time.Now().Unix()), logInfo), nil
 }
 
 func (s *AliCloudSlsLogstorage) parseMeta(meta bindings.Metadata) (*SlsLogstorageMetadata, error) {
 	var m SlsLogstorageMetadata
-	err := metadata.DecodeMetadata(meta.Properties, &m)
+	err := kitmd.DecodeMetadata(meta.Properties, &m)
 	if err != nil {
 		return nil, err
 	}
@@ -132,4 +134,12 @@ func (s *AliCloudSlsLogstorage) GetComponentMetadata() (metadataInfo metadata.Me
 	metadataStruct := SlsLogstorageMetadata{}
 	metadata.GetMetadataInfoFromStructType(reflect.TypeOf(metadataStruct), &metadataInfo, metadata.BindingType)
 	return
+}
+
+func (s *AliCloudSlsLogstorage) Close() error {
+	if s.producer != nil {
+		return s.producer.Close(time.Second.Milliseconds() * 5)
+	}
+
+	return nil
 }

@@ -55,7 +55,15 @@ builtinAuthenticationProfiles:
         default: "false"
         example: "false"
         description: |
+        
           Allow management of the Event Hub namespace and storage account.
+      - name: enableInOrderMessageDelivery
+        type: bool
+        required: false
+        default: "false"
+        example: "false"
+        description: |
+          Enable in order processing of messages within a partition.
       - name: resourceGroupName
         type: string
         required: false
@@ -90,8 +98,8 @@ builtinAuthenticationProfiles:
           entity management is enabled.
 metadata:
   # Input-only metadata
-  # consumerGroup is an alias for consumerId, if both are defined consumerId takes precedence.
-  - name: consumerId
+  # consumerGroup is an alias for consumerID, if both are defined consumerID takes precedence.
+  - name: consumerID
     type: string
     required: true # consumerGroup is an alias for this field, let's promote this to default
     binding:
@@ -108,7 +116,7 @@ metadata:
       output: false
     description: |
       The name of the Event Hubs Consumer Group to listen on.
-      Alias to consumerId.
+      Alias to consumerID.
     example: '"group1"'
     deprecated: true
   - name: storageAccountKey
@@ -153,3 +161,12 @@ metadata:
     description: |
       Storage container name.
     example: '"myeventhubstoragecontainer"'
+  - name: getAllMessageProperties
+    required: false
+    default: "false"
+    example: "false"
+    binding:
+      input: true
+      output: false
+    description: |
+      When set to true, will retrieve all message properties and include them in the returned event metadata

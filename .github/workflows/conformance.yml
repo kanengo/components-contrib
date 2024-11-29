@@ -22,12 +22,12 @@ on:
   push:
     branches:
       - 'release-*'
-      - 'gh-readonly-queue/master/*'
+      - 'gh-readonly-queue/main/*'
   pull_request:
     branches:
-      - 'master'
+      - 'main'
       - 'release-*'
-      - 'gh-readonly-queue/master/*'
+      - 'gh-readonly-queue/main/*'
   merge_group:
 
 jobs:
@@ -47,7 +47,7 @@ jobs:
         fi
 
     - name: Check out code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
         repository: ${{ env.CHECKOUT_REPO }}
         ref: ${{ env.CHECKOUT_REF }}
@@ -100,12 +100,12 @@ jobs:
       run:
         shell: bash
 
-    needs: 
+    needs:
       - generate-matrix
 
     strategy:
       fail-fast: false # Keep running even if one component fails
-      matrix: 
+      matrix:
         include: ${{ fromJson(needs.generate-matrix.outputs.test-matrix) }}
 
     steps:
@@ -126,7 +126,7 @@ jobs:
         fi
 
     - name: Check out code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
         repository: ${{ env.CHECKOUT_REPO }}
         ref: ${{ env.CHECKOUT_REF }}
@@ -142,8 +142,6 @@ jobs:
     - name: Configure conformance test and source path
       run: |
         TEST_COMPONENT=$(echo ${{ matrix.component }} | sed -E 's/\./\//g')
-        export TEST_PATH="tests/certification/${TEST_COMPONENT}"
-        echo "TEST_PATH=$TEST_PATH" >> $GITHUB_ENV
         export SOURCE_PATH="github.com/dapr/components-contrib/${TEST_COMPONENT}"
         echo "SOURCE_PATH=$SOURCE_PATH" >> $GITHUB_ENV
         # converts slashes to dots in this string, so that it doesn't consider them sub-folders
@@ -236,9 +234,10 @@ jobs:
         mongodb-replica-set: test-rs
 
     - name: Set up Go
-      uses: actions/setup-go@v3
+      uses: actions/setup-go@v4
       with:
         go-version-file: 'go.mod'
+        cache: 'false'
 
     - name: Install Node.js ${{ matrix.nodejs-version }}
       if: matrix.nodejs-version != ''
@@ -268,7 +267,7 @@ jobs:
     - name: Run tests
       continue-on-error: true
       run: |
-        set -e 
+        set -e
         KIND=$(echo ${{ matrix.component }} | cut -d. -f1)
         NAME=$(echo ${{ matrix.component }} | cut -d. -f2-)
         KIND_UPPER="$(tr '[:lower:]' '[:upper:]' <<< ${KIND:0:1})${KIND:1}"
@@ -278,7 +277,7 @@ jobs:
         fi
 
         echo "Running tests for Test${KIND_UPPER}Conformance/${KIND}/${NAME} ... "
-        echo "Source Pacakge: " ${{ matrix.source-pkg }}
+        echo "Source Package: " ${{ matrix.source-pkg }}
 
         set +e
         gotestsum --jsonfile ${{ env.TEST_OUTPUT_FILE_PREFIX }}_conformance.json \
@@ -336,13 +335,13 @@ jobs:
         name: result_files
         path: tmp/result_files
         retention-days: 1
-    
+
     - name: Prepare coverage report file to upload
       if: github.event_name == 'schedule'
       run: |
         mkdir -p tmp/conf_code_cov
         cp cover.out tmp/conf_code_cov/${{ env.SOURCE_PATH_LINEAR }}.out
-    
+
     - name: Upload coverage report file
       uses: actions/upload-artifact@v3
       if: github.event_name == 'schedule'
@@ -354,7 +353,7 @@ jobs:
     # Upload logs for test analytics to consume
     - name: Upload test results
       if: always()
-      uses: actions/upload-artifact@master
+      uses: actions/upload-artifact@main
       with:
         name: ${{ matrix.component }}_conformance_test
         path: ${{ env.TEST_OUTPUT_FILE_PREFIX }}_conformance.*

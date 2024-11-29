@@ -50,10 +50,11 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/data/aztables"
 	jsoniter "github.com/json-iterator/go"
 
-	azauth "github.com/dapr/components-contrib/internal/authentication/azure"
+	azauth "github.com/dapr/components-contrib/common/authentication/azure"
 	mdutils "github.com/dapr/components-contrib/metadata"
 	"github.com/dapr/components-contrib/state"
 	"github.com/dapr/kit/logger"
+	kitmd "github.com/dapr/kit/metadata"
 	"github.com/dapr/kit/ptr"
 )
 
@@ -210,6 +211,10 @@ func (r *StateStore) GetComponentMetadata() (metadataInfo mdutils.MetadataMap) {
 	return
 }
 
+func (r *StateStore) Close() error {
+	return nil
+}
+
 func NewAzureTablesStateStore(logger logger.Logger) state.Store {
 	s := &StateStore{
 		json:     jsoniter.ConfigFastest,
@@ -222,7 +227,7 @@ func NewAzureTablesStateStore(logger logger.Logger) state.Store {
 
 func getTablesMetadata(meta map[string]string) (*tablesMetadata, error) {
 	m := tablesMetadata{}
-	err := mdutils.DecodeMetadata(meta, &m)
+	err := kitmd.DecodeMetadata(meta, &m)
 
 	if val, ok := mdutils.GetMetadataProperty(meta, azauth.MetadataKeys["StorageAccountName"]...); ok && val != "" {
 		m.AccountName = val
@@ -253,7 +258,6 @@ func (r *StateStore) writeRow(ctx context.Context, req *state.SetRequest) error 
 	// InsertOrReplace does not support ETag concurrency, therefore we will use Insert to check for key existence
 	// and then use Update to update the key if it exists with the specified ETag
 	_, err = r.client.AddEntity(writeContext, marshalledEntity, nil)
-
 	if err != nil {
 		// If Insert failed because item already exists, try to Update instead per Upsert semantics
 		if isEntityAlreadyExistsError(err) {

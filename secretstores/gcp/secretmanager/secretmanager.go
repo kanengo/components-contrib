@@ -16,19 +16,20 @@ package secretmanager
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
+	"github.com/googleapis/gax-go/v2"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 
 	"github.com/dapr/components-contrib/metadata"
 	"github.com/dapr/components-contrib/secretstores"
 	"github.com/dapr/kit/logger"
-
-	"github.com/googleapis/gax-go/v2"
+	kitmd "github.com/dapr/kit/metadata"
 )
 
 const VersionID = "version_id"
@@ -103,11 +104,11 @@ func (s *Store) GetSecret(ctx context.Context, req secretstores.GetSecretRequest
 	res := secretstores.GetSecretResponse{Data: nil}
 
 	if s.client == nil {
-		return res, fmt.Errorf("client is not initialized")
+		return res, errors.New("client is not initialized")
 	}
 
 	if req.Name == "" {
-		return res, fmt.Errorf("missing secret name in request")
+		return res, errors.New("missing secret name in request")
 	}
 	secretName := fmt.Sprintf("projects/%s/secrets/%s", s.ProjectID, req.Name)
 
@@ -131,11 +132,11 @@ func (s *Store) BulkGetSecret(ctx context.Context, req secretstores.BulkGetSecre
 	response := map[string]map[string]string{}
 
 	if s.client == nil {
-		return secretstores.BulkGetSecretResponse{Data: nil}, fmt.Errorf("client is not initialized")
+		return secretstores.BulkGetSecretResponse{Data: nil}, errors.New("client is not initialized")
 	}
 
 	request := &secretmanagerpb.ListSecretsRequest{
-		Parent: fmt.Sprintf("projects/%s", s.ProjectID),
+		Parent: "projects/" + s.ProjectID,
 	}
 	it := s.client.ListSecrets(ctx, request)
 
@@ -170,33 +171,39 @@ func (s *Store) getSecret(ctx context.Context, secretName string, versionID stri
 		return nil, err
 	}
 
-	secret := string(result.Payload.Data)
+	secret := string(result.GetPayload().GetData())
 
 	return &secret, nil
 }
 
 func (s *Store) parseSecretManagerMetadata(metadataRaw secretstores.Metadata) (*GcpSecretManagerMetadata, error) {
 	meta := GcpSecretManagerMetadata{}
-	metadata.DecodeMetadata(metadataRaw.Properties, &meta)
+	err := kitmd.DecodeMetadata(metadataRaw.Properties, &meta)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode metadata: %w", err)
+	}
 
 	if meta.Type == "" {
-		return nil, fmt.Errorf("missing property `type` in metadata")
+		return nil, errors.New("missing property `type` in metadata")
 	}
 	if meta.ProjectID == "" {
-		return nil, fmt.Errorf("missing property `project_id` in metadata")
+		return nil, errors.New("missing property `project_id` in metadata")
 	}
 	if meta.PrivateKey == "" {
-		return nil, fmt.Errorf("missing property `private_key` in metadata")
+		return nil, errors.New("missing property `private_key` in metadata")
 	}
 	if meta.ClientEmail == "" {
-		return nil, fmt.Errorf("missing property `client_email` in metadata")
+		return nil, errors.New("missing property `client_email` in metadata")
 	}
 
 	return &meta, nil
 }
 
 func (s *Store) Close() error {
-	return s.client.Close()
+	if s.client != nil {
+		return s.client.Close()
+	}
+	return nil
 }
 
 // Features returns the features available in this secret store.

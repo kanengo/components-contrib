@@ -16,6 +16,7 @@ package wasm
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"reflect"
@@ -30,7 +31,7 @@ import (
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 
 	"github.com/dapr/components-contrib/bindings"
-	"github.com/dapr/components-contrib/internal/wasm"
+	"github.com/dapr/components-contrib/common/wasm"
 	"github.com/dapr/components-contrib/metadata"
 	"github.com/dapr/kit/logger"
 )
@@ -91,9 +92,9 @@ func (out *outputBinding) Init(ctx context.Context, metadata bindings.Metadata) 
 	if _, found := imports[modeWasiHTTP]; found {
 		if out.meta.StrictSandbox {
 			_ = out.runtime.Close(context.Background())
-			return fmt.Errorf("can not instantiate wasi-http with strict sandbox")
+			return errors.New("can not instantiate wasi-http with strict sandbox")
 		}
-		err = wasi_http.Instantiate(ctx, out.runtime)
+		err = wasi_http.MakeWasiHTTP().Instantiate(ctx, out.runtime)
 	}
 	if err != nil {
 		_ = out.runtime.Close(context.Background())
@@ -134,16 +135,16 @@ func (out *outputBinding) Invoke(ctx context.Context, req *bindings.InvokeReques
 
 	// Instantiating executes the guest's main function (exported as _start).
 	mod, err := out.runtime.InstantiateModule(ctx, out.module, moduleConfig)
+	if err != nil {
+		return nil, err
+	}
 
 	// WASI typically calls proc_exit which exits the module, but just in case
 	// it doesn't, close the module manually.
 	_ = mod.Close(ctx)
 
 	// Return STDOUT if there was no error.
-	if err == nil {
-		return &bindings.InvokeResponse{Data: stdout.Bytes()}, nil
-	}
-	return nil, err
+	return &bindings.InvokeResponse{Data: stdout.Bytes()}, nil
 }
 
 func (out *outputBinding) Operations() []bindings.OperationKind {

@@ -1,12 +1,12 @@
 package kubemq
 
 import (
-	"fmt"
+	"errors"
 	"strconv"
 	"strings"
 
-	"github.com/dapr/components-contrib/metadata"
 	"github.com/dapr/components-contrib/pubsub"
+	kitmd "github.com/dapr/kit/metadata"
 )
 
 type kubemqMetadata struct {
@@ -26,15 +26,15 @@ func parseAddress(address string) (string, int, error) {
 	var err error
 	hostPort := strings.Split(address, ":")
 	if len(hostPort) != 2 {
-		return "", 0, fmt.Errorf("invalid kubeMQ address, address format is invalid")
+		return "", 0, errors.New("invalid kubeMQ address, address format is invalid")
 	}
 	host = hostPort[0]
 	if len(host) == 0 {
-		return "", 0, fmt.Errorf("invalid kubeMQ address, host is empty")
+		return "", 0, errors.New("invalid kubeMQ address, host is empty")
 	}
 	port, err = strconv.Atoi(hostPort[1])
 	if err != nil {
-		return "", 0, fmt.Errorf("invalid kubeMQ address, port is invalid")
+		return "", 0, errors.New("invalid kubeMQ address, port is invalid")
 	}
 	return host, port, nil
 }
@@ -45,19 +45,18 @@ func createMetadata(pubSubMetadata pubsub.Metadata) (*kubemqMetadata, error) {
 		IsStore: true,
 	}
 
-	err := metadata.DecodeMetadata(pubSubMetadata.Properties, result)
+	err := kitmd.DecodeMetadata(pubSubMetadata.Properties, result)
 	if err != nil {
 		return nil, err
 	}
 
 	if result.Address != "" {
-		var err error
 		result.internalHost, result.internalPort, err = parseAddress(result.Address)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		return nil, fmt.Errorf("invalid kubeMQ address, address is empty")
+		return nil, errors.New("invalid kubeMQ address, address is empty")
 	}
 	return result, nil
 }

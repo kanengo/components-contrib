@@ -25,6 +25,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dapr/components-contrib/contenttype"
+
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/bsonrw"
@@ -39,6 +41,7 @@ import (
 	"github.com/dapr/components-contrib/state/query"
 	stateutils "github.com/dapr/components-contrib/state/utils"
 	"github.com/dapr/kit/logger"
+	kitmd "github.com/dapr/kit/metadata"
 	"github.com/dapr/kit/ptr"
 )
 
@@ -138,11 +141,11 @@ func (m *MongoDB) Init(ctx context.Context, metadata state.Metadata) (err error)
 		return fmt.Errorf("error in creating mongodb client: %s", err)
 	}
 
+	m.client = client
+
 	if err = client.Ping(ctx, nil); err != nil {
 		return fmt.Errorf("error in connecting to mongodb, host: %s error: %s", m.metadata.Host, err)
 	}
-
-	m.client = client
 
 	// get the write concern
 	wc, err := getWriteConcernObject(m.metadata.Writeconcern)
@@ -527,7 +530,18 @@ func (m *MongoDB) doTransaction(sessCtx mongo.SessionContext, operations []state
 		var err error
 		switch req := o.(type) {
 		case state.SetRequest:
-			err = m.setInternal(sessCtx, &req)
+			{
+				isJSON := (len(req.Metadata) > 0 && req.Metadata[metadata.ContentType] == contenttype.JSONContentType)
+				if isJSON {
+					if bytes, ok := req.Value.([]byte); ok {
+						err = json.Unmarshal(bytes, &req.Value)
+						if err != nil {
+							break
+						}
+					}
+				}
+				err = m.setInternal(sessCtx, &req)
+			}
 		case state.DeleteRequest:
 			err = m.deleteInternal(sessCtx, &req)
 		}
@@ -612,9 +626,9 @@ func getMongoDBMetaData(meta state.Metadata) (mongoDBMetadata, error) {
 		OperationTimeout: defaultTimeout,
 	}
 
-	decodeErr := metadata.DecodeMetadata(meta.Properties, &m)
-	if decodeErr != nil {
-		return m, decodeErr
+	err := kitmd.DecodeMetadata(meta.Properties, &m)
+	if err != nil {
+		return m, err
 	}
 
 	if m.ConnectionString == "" {
@@ -632,7 +646,6 @@ func getMongoDBMetaData(meta state.Metadata) (mongoDBMetadata, error) {
 		}
 	}
 
-	var err error
 	if val, ok := meta.Properties[operationTimeout]; ok && val != "" {
 		m.OperationTimeout, err = time.ParseDuration(val)
 		if err != nil {
@@ -693,10 +706,12 @@ func (m *MongoDB) GetComponentMetadata() (metadataInfo metadata.MetadataMap) {
 }
 
 // Close connection to the database.
-func (m *MongoDB) Close(ctx context.Context) (err error) {
+func (m *MongoDB) Close() error {
 	if m.client == nil {
 		return nil
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
 	return m.client.Disconnect(ctx)
 }

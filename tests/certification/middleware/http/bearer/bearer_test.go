@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"sync/atomic"
 	"testing"
@@ -32,7 +33,6 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/exp/slices"
 
 	// Import the embed package.
 	_ "embed"
@@ -46,7 +46,7 @@ import (
 	"github.com/dapr/components-contrib/tests/certification/flow/sidecar"
 	httpMiddlewareLoader "github.com/dapr/dapr/pkg/components/middleware/http"
 	"github.com/dapr/dapr/pkg/config/protocol"
-	httpMiddleware "github.com/dapr/dapr/pkg/middleware/http"
+	runtimeMiddleware "github.com/dapr/dapr/pkg/middleware"
 	dapr_testing "github.com/dapr/dapr/pkg/testing"
 	"github.com/dapr/go-sdk/service/common"
 	"github.com/dapr/kit/logger"
@@ -437,7 +437,7 @@ func TestHTTPMiddlewareBearer(t *testing.T) {
 					"audience": tokenAudience,
 				})
 				require.Error(t, err)
-				assert.ErrorContains(t, err, "invalid response status code: 404")
+				require.ErrorContains(t, err, "invalid response status code: 404")
 
 				// No endpoint should be requested
 				assert.Equal(t, curRequestsOpenIDConfiguration, requestsOpenIDConfiguration.Load())
@@ -453,7 +453,7 @@ func TestHTTPMiddlewareBearer(t *testing.T) {
 					"audience": tokenAudience,
 				})
 				require.Error(t, err)
-				assert.ErrorContains(t, err, "the issuer found in the OpenID Configuration document")
+				require.ErrorContains(t, err, "the issuer found in the OpenID Configuration document")
 
 				// Only the OpenID Configuration endpoint should be requested
 				assert.Equal(t, curRequestsOpenIDConfiguration+1, requestsOpenIDConfiguration.Load())
@@ -470,7 +470,7 @@ func TestHTTPMiddlewareBearer(t *testing.T) {
 					"jwksURL":  tokenIssuer + "/not-found/jwks.json",
 				})
 				require.Error(t, err)
-				assert.ErrorContains(t, err, "failed to fetch JWKS")
+				require.ErrorContains(t, err, "failed to fetch JWKS")
 
 				// No endpoint should be requested
 				assert.Equal(t, curRequestsOpenIDConfiguration, requestsOpenIDConfiguration.Load())
@@ -528,7 +528,7 @@ func componentRuntimeOptions() []embedded.Option {
 	middlewareRegistry := httpMiddlewareLoader.NewRegistry()
 	middlewareRegistry.Logger = log
 	middlewareRegistry.RegisterComponent(func(log logger.Logger) httpMiddlewareLoader.FactoryMethod {
-		return func(metadata middleware.Metadata) (httpMiddleware.Middleware, error) {
+		return func(metadata middleware.Metadata) (runtimeMiddleware.HTTP, error) {
 			return bearerMw.NewBearerMiddleware(log).GetHandler(context.Background(), metadata)
 		}
 	}, "bearer")

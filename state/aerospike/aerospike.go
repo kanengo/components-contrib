@@ -29,6 +29,7 @@ import (
 	"github.com/dapr/components-contrib/metadata"
 	"github.com/dapr/components-contrib/state"
 	"github.com/dapr/kit/logger"
+	kitmd "github.com/dapr/kit/metadata"
 	"github.com/dapr/kit/ptr"
 )
 
@@ -69,7 +70,7 @@ func NewAerospikeStateStore(logger logger.Logger) state.Store {
 
 func parseAndValidateMetadata(meta state.Metadata) (*aerospikeMetadata, error) {
 	var m aerospikeMetadata
-	decodeErr := metadata.DecodeMetadata(meta.Properties, &m)
+	decodeErr := kitmd.DecodeMetadata(meta.Properties, &m)
 	if decodeErr != nil {
 		return nil, decodeErr
 	}
@@ -245,6 +246,10 @@ func (aspike *Aerospike) Delete(ctx context.Context, req *state.DeleteRequest) e
 	return nil
 }
 
+func (aspike *Aerospike) Close() error {
+	return nil
+}
+
 func parseHosts(hostsMeta string) ([]*as.Host, error) {
 	hostPorts := []*as.Host{}
 	for _, hostPort := range strings.Split(hostsMeta, ",") {
@@ -256,6 +261,7 @@ func parseHosts(hostsMeta string) ([]*as.Host, error) {
 		if err != nil {
 			return nil, errInvalidHosts
 		}
+		//nolint:gosec
 		hostPorts = append(hostPorts, as.NewHost(host, int(port)))
 	}
 

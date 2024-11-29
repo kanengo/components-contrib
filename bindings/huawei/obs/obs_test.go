@@ -17,7 +17,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -25,6 +24,7 @@ import (
 
 	"github.com/huaweicloud/huaweicloud-sdk-go-obs/obs"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/dapr/components-contrib/bindings"
 	"github.com/dapr/kit/logger"
@@ -60,6 +60,8 @@ func (m *MockHuaweiOBSService) ListObjects(ctx context.Context, input *obs.ListO
 	return m.ListObjectsFn(ctx, input)
 }
 
+func (m *MockHuaweiOBSService) Close() {}
+
 func TestParseMetadata(t *testing.T) {
 	obs := NewHuaweiOBS(logger.NewLogger("test")).(*HuaweiOBS)
 
@@ -73,7 +75,7 @@ func TestParseMetadata(t *testing.T) {
 		}
 
 		meta, err := obs.parseMetadata(m)
-		assert.Nil(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, "dummy-bucket", meta.Bucket)
 		assert.Equal(t, "dummy-endpoint", meta.Endpoint)
 		assert.Equal(t, "dummy-ak", meta.AccessKey)
@@ -93,7 +95,7 @@ func TestInit(t *testing.T) {
 			"secretKey": "dummy-sk",
 		}
 		err := obs.Init(context.Background(), m)
-		assert.Nil(t, err)
+		require.NoError(t, err)
 	})
 	t.Run("Init with missing bucket name", func(t *testing.T) {
 		m := bindings.Metadata{}
@@ -103,8 +105,8 @@ func TestInit(t *testing.T) {
 			"secretKey": "dummy-sk",
 		}
 		err := obs.Init(context.Background(), m)
-		assert.NotNil(t, err)
-		assert.Equal(t, err, fmt.Errorf("missing obs bucket name"))
+		require.Error(t, err)
+		assert.Equal(t, err, errors.New("missing obs bucket name"))
 	})
 	t.Run("Init with missing access key", func(t *testing.T) {
 		m := bindings.Metadata{}
@@ -114,8 +116,8 @@ func TestInit(t *testing.T) {
 			"secretKey": "dummy-sk",
 		}
 		err := obs.Init(context.Background(), m)
-		assert.NotNil(t, err)
-		assert.Equal(t, err, fmt.Errorf("missing the huawei access key"))
+		require.Error(t, err)
+		assert.Equal(t, err, errors.New("missing the huawei access key"))
 	})
 	t.Run("Init with missing secret key", func(t *testing.T) {
 		m := bindings.Metadata{}
@@ -125,8 +127,8 @@ func TestInit(t *testing.T) {
 			"accessKey": "dummy-ak",
 		}
 		err := obs.Init(context.Background(), m)
-		assert.NotNil(t, err)
-		assert.Equal(t, err, fmt.Errorf("missing the huawei secret key"))
+		require.Error(t, err)
+		assert.Equal(t, err, errors.New("missing the huawei secret key"))
 	})
 	t.Run("Init with missing endpoint", func(t *testing.T) {
 		m := bindings.Metadata{}
@@ -136,8 +138,8 @@ func TestInit(t *testing.T) {
 			"secretKey": "dummy-sk",
 		}
 		err := obs.Init(context.Background(), m)
-		assert.NotNil(t, err)
-		assert.Equal(t, err, fmt.Errorf("missing obs endpoint"))
+		require.Error(t, err)
+		assert.Equal(t, err, errors.New("missing obs endpoint"))
 	})
 }
 
@@ -146,7 +148,7 @@ func TestOperations(t *testing.T) {
 
 	t.Run("Count supported operations", func(t *testing.T) {
 		ops := obs.Operations()
-		assert.Equal(t, 5, len(ops))
+		assert.Len(t, ops, 5)
 	})
 }
 
@@ -177,11 +179,11 @@ func TestCreateOperation(t *testing.T) {
 		}
 
 		out, err := mo.create(context.Background(), req)
-		assert.Nil(t, err)
+		require.NoError(t, err)
 
 		var data createResponse
 		err = json.Unmarshal(out.Data, &data)
-		assert.Nil(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, 200, data.StatusCode)
 	})
 
@@ -208,11 +210,11 @@ func TestCreateOperation(t *testing.T) {
 		}
 
 		out, err := mo.create(context.Background(), req)
-		assert.Nil(t, err)
+		require.NoError(t, err)
 
 		var data createResponse
 		err = json.Unmarshal(out.Data, &data)
-		assert.Nil(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, 200, data.StatusCode)
 	})
 
@@ -241,14 +243,14 @@ func TestCreateOperation(t *testing.T) {
 		}
 
 		_, err := mo.create(context.Background(), req)
-		assert.Nil(t, err)
+		require.NoError(t, err)
 	})
 
 	t.Run("Fail create object with obs internal error", func(t *testing.T) {
 		mo := &HuaweiOBS{
 			service: &MockHuaweiOBSService{
 				PutObjectFn: func(ctx context.Context, input *obs.PutObjectInput) (output *obs.PutObjectOutput, err error) {
-					return nil, fmt.Errorf("error while creating object")
+					return nil, errors.New("error while creating object")
 				},
 			},
 			logger: logger.NewLogger("test"),
@@ -266,7 +268,7 @@ func TestCreateOperation(t *testing.T) {
 		}
 
 		_, err := mo.create(context.Background(), req)
-		assert.NotNil(t, err)
+		require.Error(t, err)
 	})
 }
 
@@ -297,11 +299,11 @@ func TestUploadOperation(t *testing.T) {
 		}
 
 		out, err := mo.upload(context.Background(), req)
-		assert.Nil(t, err)
+		require.NoError(t, err)
 
 		var data createResponse
 		err = json.Unmarshal(out.Data, &data)
-		assert.Nil(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, 200, data.StatusCode)
 	})
 
@@ -328,11 +330,11 @@ func TestUploadOperation(t *testing.T) {
 		}
 
 		out, err := mo.upload(context.Background(), req)
-		assert.Nil(t, err)
+		require.NoError(t, err)
 
 		var data createResponse
 		err = json.Unmarshal(out.Data, &data)
-		assert.Nil(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, 200, data.StatusCode)
 	})
 
@@ -340,7 +342,7 @@ func TestUploadOperation(t *testing.T) {
 		mo := &HuaweiOBS{
 			service: &MockHuaweiOBSService{
 				PutFileFn: func(ctx context.Context, input *obs.PutFileInput) (output *obs.PutObjectOutput, err error) {
-					return nil, fmt.Errorf("error while creating object")
+					return nil, errors.New("error while creating object")
 				},
 			},
 			logger: logger.NewLogger("test"),
@@ -358,7 +360,7 @@ func TestUploadOperation(t *testing.T) {
 		}
 
 		_, err := mo.upload(context.Background(), req)
-		assert.NotNil(t, err)
+		require.Error(t, err)
 	})
 }
 
@@ -392,7 +394,7 @@ func TestGetOperation(t *testing.T) {
 		}
 
 		_, err := mo.get(context.Background(), req)
-		assert.Nil(t, err)
+		require.NoError(t, err)
 	})
 
 	t.Run("Fail get object with no key metadata", func(t *testing.T) {
@@ -409,14 +411,14 @@ func TestGetOperation(t *testing.T) {
 		}
 
 		_, err := mo.get(context.Background(), req)
-		assert.NotNil(t, err)
+		require.Error(t, err)
 	})
 
 	t.Run("Fail get object with obs internal error", func(t *testing.T) {
 		mo := &HuaweiOBS{
 			service: &MockHuaweiOBSService{
 				GetObjectFn: func(ctx context.Context, input *obs.GetObjectInput) (output *obs.GetObjectOutput, err error) {
-					return nil, fmt.Errorf("error while getting object")
+					return nil, errors.New("error while getting object")
 				},
 			},
 			logger: logger.NewLogger("test"),
@@ -433,7 +435,7 @@ func TestGetOperation(t *testing.T) {
 		}
 
 		_, err := mo.get(context.Background(), req)
-		assert.NotNil(t, err)
+		require.Error(t, err)
 	})
 
 	t.Run("Fail get object with no response data", func(t *testing.T) {
@@ -465,7 +467,7 @@ func TestGetOperation(t *testing.T) {
 		}
 
 		_, err := mo.get(context.Background(), req)
-		assert.NotNil(t, err)
+		require.Error(t, err)
 	})
 }
 
@@ -495,11 +497,11 @@ func TestDeleteOperation(t *testing.T) {
 		}
 
 		out, err := mo.delete(context.Background(), req)
-		assert.Nil(t, err)
+		require.NoError(t, err)
 
 		var data createResponse
 		err = json.Unmarshal(out.Data, &data)
-		assert.Nil(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, 200, data.StatusCode)
 	})
 
@@ -517,14 +519,14 @@ func TestDeleteOperation(t *testing.T) {
 		}
 
 		_, err := mo.delete(context.Background(), req)
-		assert.NotNil(t, err)
+		require.Error(t, err)
 	})
 
 	t.Run("Fail delete object with obs internal error", func(t *testing.T) {
 		mo := &HuaweiOBS{
 			service: &MockHuaweiOBSService{
 				DeleteObjectFn: func(ctx context.Context, input *obs.DeleteObjectInput) (output *obs.DeleteObjectOutput, err error) {
-					return nil, fmt.Errorf("error while deleting object")
+					return nil, errors.New("error while deleting object")
 				},
 			},
 			logger: logger.NewLogger("test"),
@@ -541,7 +543,7 @@ func TestDeleteOperation(t *testing.T) {
 		}
 
 		_, err := mo.delete(context.Background(), req)
-		assert.NotNil(t, err)
+		require.Error(t, err)
 	})
 }
 
@@ -572,14 +574,14 @@ func TestListOperation(t *testing.T) {
 		}
 
 		_, err := mo.list(context.Background(), req)
-		assert.Nil(t, err)
+		require.NoError(t, err)
 	})
 
 	t.Run("Fail list objects with obs internal error", func(t *testing.T) {
 		mo := &HuaweiOBS{
 			service: &MockHuaweiOBSService{
 				ListObjectsFn: func(ctx context.Context, input *obs.ListObjectsInput) (output *obs.ListObjectsOutput, err error) {
-					return nil, fmt.Errorf("error while listing objects")
+					return nil, errors.New("error while listing objects")
 				},
 			},
 			logger: logger.NewLogger("test"),
@@ -597,7 +599,7 @@ func TestListOperation(t *testing.T) {
 		}
 
 		_, err := mo.list(context.Background(), req)
-		assert.NotNil(t, err)
+		require.Error(t, err)
 	})
 
 	t.Run("Successfully list objects with default maxResults", func(t *testing.T) {
@@ -626,7 +628,7 @@ func TestListOperation(t *testing.T) {
 		}
 
 		_, err := mo.list(context.Background(), req)
-		assert.Nil(t, err)
+		require.NoError(t, err)
 	})
 }
 
@@ -653,7 +655,7 @@ func TestInvoke(t *testing.T) {
 		}
 
 		_, err := mo.Invoke(context.Background(), req)
-		assert.Nil(t, err)
+		require.NoError(t, err)
 	})
 
 	t.Run("Successfully invoke get", func(t *testing.T) {
@@ -685,7 +687,7 @@ func TestInvoke(t *testing.T) {
 		}
 
 		_, err := mo.Invoke(context.Background(), req)
-		assert.Nil(t, err)
+		require.NoError(t, err)
 	})
 
 	t.Run("Successfully invoke delete", func(t *testing.T) {
@@ -713,7 +715,7 @@ func TestInvoke(t *testing.T) {
 		}
 
 		_, err := mo.Invoke(context.Background(), req)
-		assert.Nil(t, err)
+		require.NoError(t, err)
 	})
 
 	t.Run("Successfully invoke list", func(t *testing.T) {
@@ -742,7 +744,7 @@ func TestInvoke(t *testing.T) {
 		}
 
 		_, err := mo.Invoke(context.Background(), req)
-		assert.Nil(t, err)
+		require.NoError(t, err)
 	})
 
 	t.Run("Error invoke unknown operation type", func(t *testing.T) {
@@ -759,6 +761,6 @@ func TestInvoke(t *testing.T) {
 		}
 
 		_, err := mo.Invoke(context.Background(), req)
-		assert.NotNil(t, err)
+		require.Error(t, err)
 	})
 }

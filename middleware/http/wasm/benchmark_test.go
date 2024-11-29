@@ -21,7 +21,7 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/dapr/components-contrib/internal/httputils"
+	"github.com/dapr/components-contrib/common/httputils"
 	"github.com/dapr/components-contrib/metadata"
 	dapr "github.com/dapr/components-contrib/middleware"
 	"github.com/dapr/kit/logger"
@@ -91,11 +91,11 @@ var benches = map[string]struct {
 				httputils.RespondWithErrorAndMessage(w, http.StatusInternalServerError, body)
 			}
 			if path := r.URL.Path; path != "/v1.0/hello" {
-				body := fmt.Sprintf("Expected wasm to rewrite path: %s", path)
+				body := "Expected wasm to rewrite path: " + path
 				httputils.RespondWithErrorAndMessage(w, http.StatusInternalServerError, body)
 			}
 			if query := r.URL.RawQuery; query != "name=teddy" {
-				body := fmt.Sprintf("Expected wasm to retain query: %s", query)
+				body := "Expected wasm to retain query: " + query
 				httputils.RespondWithErrorAndMessage(w, http.StatusInternalServerError, body)
 			}
 			w.Header().Set("Content-Type", "text/plain")

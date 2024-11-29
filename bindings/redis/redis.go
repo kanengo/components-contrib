@@ -20,7 +20,7 @@ import (
 	"reflect"
 
 	"github.com/dapr/components-contrib/bindings"
-	rediscomponent "github.com/dapr/components-contrib/internal/component/redis"
+	rediscomponent "github.com/dapr/components-contrib/common/component/redis"
 	"github.com/dapr/components-contrib/metadata"
 	"github.com/dapr/kit/logger"
 )
@@ -44,7 +44,7 @@ func NewRedis(logger logger.Logger) bindings.OutputBinding {
 
 // Init performs metadata parsing and connection creation.
 func (r *Redis) Init(ctx context.Context, meta bindings.Metadata) (err error) {
-	r.client, r.clientSettings, err = rediscomponent.ParseClientFromProperties(meta.Properties, metadata.BindingType)
+	r.client, r.clientSettings, err = rediscomponent.ParseClientFromProperties(meta.Properties, metadata.BindingType, ctx, &r.logger)
 	if err != nil {
 		return err
 	}

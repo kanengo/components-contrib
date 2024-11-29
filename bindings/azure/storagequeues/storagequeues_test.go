@@ -104,12 +104,12 @@ func TestWriteQueue(t *testing.T) {
 	_, err = a.Invoke(context.Background(), &r)
 
 	require.NoError(t, err)
-	assert.NoError(t, a.Close())
+	require.NoError(t, a.Close())
 }
 
 func TestWriteWithTTLInQueue(t *testing.T) {
 	mm := new(MockHelper)
-	mm.On("Write", mock.AnythingOfTypeArgument("[]uint8"), mock.MatchedBy(func(in *time.Duration) bool {
+	mm.On("Write", mock.AnythingOfType("[]uint8"), mock.MatchedBy(func(in *time.Duration) bool {
 		return in != nil && *in == time.Second
 	})).Return(nil)
 
@@ -126,12 +126,12 @@ func TestWriteWithTTLInQueue(t *testing.T) {
 	_, err = a.Invoke(context.Background(), &r)
 
 	require.NoError(t, err)
-	assert.NoError(t, a.Close())
+	require.NoError(t, a.Close())
 }
 
 func TestWriteWithTTLInWrite(t *testing.T) {
 	mm := new(MockHelper)
-	mm.On("Write", mock.AnythingOfTypeArgument("[]uint8"), mock.MatchedBy(func(in *time.Duration) bool {
+	mm.On("Write", mock.AnythingOfType("[]uint8"), mock.MatchedBy(func(in *time.Duration) bool {
 		return in != nil && *in == time.Second
 	})).Return(nil)
 
@@ -151,7 +151,7 @@ func TestWriteWithTTLInWrite(t *testing.T) {
 	_, err = a.Invoke(context.Background(), &r)
 
 	require.NoError(t, err)
-	assert.NoError(t, a.Close())
+	require.NoError(t, a.Close())
 }
 
 // Uncomment this function to write a message to local storage queue
@@ -195,7 +195,7 @@ func TestReadQueue(t *testing.T) {
 	handler := func(ctx context.Context, data *bindings.ReadResponse) ([]byte, error) {
 		received++
 		s := string(data.Data)
-		assert.Equal(t, s, "This is my message")
+		assert.Equal(t, "This is my message", s)
 		cancel()
 
 		return nil, nil
@@ -210,7 +210,7 @@ func TestReadQueue(t *testing.T) {
 		t.Fatal("Timeout waiting for messages")
 	}
 	assert.Equal(t, 1, received)
-	assert.NoError(t, a.Close())
+	require.NoError(t, a.Close())
 }
 
 func TestReadQueueDecode(t *testing.T) {
@@ -237,7 +237,7 @@ func TestReadQueueDecode(t *testing.T) {
 	handler := func(ctx context.Context, data *bindings.ReadResponse) ([]byte, error) {
 		received++
 		s := string(data.Data)
-		assert.Equal(t, s, "This is my message")
+		assert.Equal(t, "This is my message", s)
 		cancel()
 
 		return nil, nil
@@ -252,7 +252,7 @@ func TestReadQueueDecode(t *testing.T) {
 		t.Fatal("Timeout waiting for messages")
 	}
 	assert.Equal(t, 1, received)
-	assert.NoError(t, a.Close())
+	require.NoError(t, a.Close())
 }
 
 // Uncomment this function to test reding from local queue
@@ -302,7 +302,7 @@ func TestReadQueueNoMessage(t *testing.T) {
 	handler := func(ctx context.Context, data *bindings.ReadResponse) ([]byte, error) {
 		received++
 		s := string(data.Data)
-		assert.Equal(t, s, "This is my message")
+		assert.Equal(t, "This is my message", s)
 
 		return nil, nil
 	}
@@ -311,7 +311,7 @@ func TestReadQueueNoMessage(t *testing.T) {
 	time.Sleep(1 * time.Second)
 	cancel()
 	assert.Equal(t, 0, received)
-	assert.NoError(t, a.Close())
+	require.NoError(t, a.Close())
 }
 
 func TestParseMetadata(t *testing.T) {
@@ -352,7 +352,6 @@ func TestParseMetadata(t *testing.T) {
 			// expectedAccountKey:       "myKey",
 			expectedQueueName:         "queue1",
 			expectedQueueEndpointURL:  "",
-			expectedTTL:               ptr.Of(time.Duration(0)),
 			expectedPollingInterval:   defaultPollingInterval,
 			expectedVisibilityTimeout: ptr.Of(defaultVisibilityTimeout),
 		},
@@ -394,7 +393,12 @@ func TestParseMetadata(t *testing.T) {
 			require.NoError(t, err)
 			// assert.Equal(t, tt.expectedAccountKey, meta.AccountKey)
 			assert.Equal(t, tt.expectedQueueName, meta.QueueName)
-			assert.Equal(t, tt.expectedTTL, meta.TTL)
+			if tt.expectedTTL != nil {
+				_ = assert.NotNil(t, meta.TTL, "Expected TTL to be %v", *tt.expectedTTL) &&
+					assert.Equal(t, *tt.expectedTTL, *meta.TTL)
+			} else if meta.TTL != nil {
+				assert.Failf(t, "Expected TTL to be nil", "Value was %v", *meta.TTL)
+			}
 			assert.Equal(t, tt.expectedQueueEndpointURL, meta.QueueEndpoint)
 			assert.Equal(t, tt.expectedVisibilityTimeout, meta.VisibilityTimeout)
 		})
@@ -440,7 +444,7 @@ func TestParseMetadataWithInvalidTTL(t *testing.T) {
 			m.Properties = tt.properties
 
 			_, err := parseMetadata(m)
-			assert.NotNil(t, err)
+			require.Error(t, err)
 		})
 	}
 }

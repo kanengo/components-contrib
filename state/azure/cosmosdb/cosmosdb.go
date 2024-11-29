@@ -30,13 +30,14 @@ import (
 	"github.com/google/uuid"
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/dapr/components-contrib/common/authentication/azure"
 	"github.com/dapr/components-contrib/contenttype"
-	"github.com/dapr/components-contrib/internal/authentication/azure"
 	contribmeta "github.com/dapr/components-contrib/metadata"
 	"github.com/dapr/components-contrib/state"
 	"github.com/dapr/components-contrib/state/query"
 	stateutils "github.com/dapr/components-contrib/state/utils"
 	"github.com/dapr/kit/logger"
+	kitmd "github.com/dapr/kit/metadata"
 	"github.com/dapr/kit/ptr"
 )
 
@@ -80,7 +81,6 @@ type CosmosItem struct {
 const (
 	metadataPartitionKey = "partitionKey"
 	defaultTimeout       = 20 * time.Second
-	statusNotFound       = "NotFound"
 )
 
 // Policy that makes all queries cross-partition
@@ -91,8 +91,11 @@ func (p crossPartitionQueryPolicy) Do(req *policy.Request) (*http.Response, erro
 	// Check if we're performing a query
 	// In that case, remove the partitionkey header and enable cross-partition queries
 	if strings.ToLower(raw.Header.Get("x-ms-documentdb-query")) == "true" {
-		raw.Header.Add("x-ms-documentdb-query-enablecrosspartition", "true")
-		raw.Header.Del("x-ms-documentdb-partitionkey")
+		// Only when the partitionKey is fake (true), it will be removed amd enabled the cross partition
+		if strings.ToLower(raw.Header.Get("x-ms-documentdb-partitionkey")) == "[true]" {
+			raw.Header.Add("x-ms-documentdb-query-enablecrosspartition", "true")
+			raw.Header.Del("x-ms-documentdb-partitionkey")
+		}
 	}
 	return req.Next()
 }
@@ -119,7 +122,7 @@ func (c *StateStore) Init(ctx context.Context, meta state.Metadata) error {
 	m := metadata{
 		ContentType: "application/json",
 	}
-	errDecode := contribmeta.DecodeMetadata(meta.Properties, &m)
+	errDecode := kitmd.DecodeMetadata(meta.Properties, &m)
 	if errDecode != nil {
 		return errDecode
 	}
@@ -205,6 +208,7 @@ func (c *StateStore) Features() []state.Feature {
 		state.FeatureTransactional,
 		state.FeatureQueryAPI,
 		state.FeatureTTL,
+		state.FeaturePartitionKey,
 	}
 }
 
@@ -223,8 +227,7 @@ func (c *StateStore) Get(ctx context.Context, req *state.GetRequest) (*state.Get
 	defer cancel()
 	readItem, err := c.client.ReadItem(readCtx, azcosmos.NewPartitionKeyString(partitionKey), req.Key, &options)
 	if err != nil {
-		var responseErr *azcore.ResponseError
-		if errors.As(err, &responseErr) && responseErr.ErrorCode == "NotFound" {
+		if isNotFoundError(err) {
 			return &state.GetResponse{}, nil
 		}
 		return nil, err
@@ -593,6 +596,12 @@ func (c *StateStore) Query(ctx context.Context, req *state.QueryRequest) (*state
 		return &state.QueryResponse{}, err
 	}
 
+	// If present partitionKey, the value will be used in the query disabling the cross partition
+	q.partitionKey = ""
+	if val, found := req.Metadata[metadataPartitionKey]; found {
+		q.partitionKey = val
+	}
+
 	data, token, err := q.execute(ctx, c.client)
 	if err != nil {
 		return nil, err
@@ -611,6 +620,10 @@ func (c *StateStore) Ping(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	return nil
+}
+
+func (c *StateStore) Close() error {
 	return nil
 }
 
@@ -679,9 +692,10 @@ func isNotFoundError(err error) bool {
 	}
 
 	if requestError, ok := err.(*azcore.ResponseError); ok {
-		if requestError.ErrorCode == statusNotFound {
+		if requestError.StatusCode == http.StatusNotFound {
 			return true
 		}
+		// we previously checked the error code, but unfortunately this is not stable between API versions
 	}
 
 	return false

@@ -14,13 +14,14 @@ limitations under the License.
 package jetstream
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/nats-io/nats.go"
 
-	contribMetadata "github.com/dapr/components-contrib/metadata"
 	"github.com/dapr/components-contrib/pubsub"
+	kitmd "github.com/dapr/kit/metadata"
 )
 
 type metadata struct {
@@ -55,31 +56,38 @@ type metadata struct {
 	internalAckPolicy     nats.AckPolicy     `mapstructure:"-"`
 	Domain                string             `mapstructure:"domain"`
 	APIPrefix             string             `mapstructure:"apiPrefix"`
+
+	Concurrency pubsub.ConcurrencyMode `mapstructure:"concurrency"`
 }
 
 func parseMetadata(psm pubsub.Metadata) (metadata, error) {
-	var m metadata
+	m := metadata{
+		Concurrency: pubsub.Single,
+	}
 
-	contribMetadata.DecodeMetadata(psm.Properties, &m)
+	err := kitmd.DecodeMetadata(psm.Properties, &m)
+	if err != nil {
+		return metadata{}, err
+	}
 
 	if m.NatsURL == "" {
-		return metadata{}, fmt.Errorf("missing nats URL")
+		return metadata{}, errors.New("missing nats URL")
 	}
 
 	if m.Jwt != "" && m.SeedKey == "" {
-		return metadata{}, fmt.Errorf("missing seed key")
+		return metadata{}, errors.New("missing seed key")
 	}
 
 	if m.Jwt == "" && m.SeedKey != "" {
-		return metadata{}, fmt.Errorf("missing jwt")
+		return metadata{}, errors.New("missing jwt")
 	}
 
 	if m.TLSClientCert != "" && m.TLSClientKey == "" {
-		return metadata{}, fmt.Errorf("missing tls client key")
+		return metadata{}, errors.New("missing tls client key")
 	}
 
 	if m.TLSClientCert == "" && m.TLSClientKey != "" {
-		return metadata{}, fmt.Errorf("missing tls client cert")
+		return metadata{}, errors.New("missing tls client cert")
 	}
 
 	if m.Name == "" {
@@ -87,7 +95,7 @@ func parseMetadata(psm pubsub.Metadata) (metadata, error) {
 	}
 
 	if m.StartTime != nil {
-		m.internalStartTime = time.Unix(int64(*m.StartTime), 0)
+		m.internalStartTime = time.Unix(int64(*m.StartTime), 0) //nolint:gosec
 	}
 
 	switch m.DeliverPolicy {
@@ -114,6 +122,17 @@ func parseMetadata(psm pubsub.Metadata) (metadata, error) {
 		m.internalAckPolicy = nats.AckNonePolicy
 	default:
 		m.internalAckPolicy = nats.AckExplicitPolicy
+	}
+
+	// Explicit check to prevent overriding the Single default
+	// (the previous behavior) if not set.
+	// TODO: See https://github.com/dapr/components-contrib/pull/3222#discussion_r1389772053
+	if psm.Properties[pubsub.ConcurrencyKey] != "" {
+		c, err := pubsub.Concurrency(psm.Properties)
+		if err != nil {
+			return metadata{}, err
+		}
+		m.Concurrency = c
 	}
 
 	return m, nil

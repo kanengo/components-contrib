@@ -14,7 +14,6 @@ limitations under the License.
 package metadata
 
 import (
-	"errors"
 	"fmt"
 	"math"
 	"reflect"
@@ -22,16 +21,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mitchellh/mapstructure"
-	"github.com/spf13/cast"
-
-	"github.com/dapr/components-contrib/internal/utils"
-	"github.com/dapr/kit/ptr"
+	kitmd "github.com/dapr/kit/metadata"
+	"github.com/dapr/kit/utils"
 )
 
 const (
-	// TTLMetadataKey defines the metadata key for setting a time to live (in seconds).
-	TTLMetadataKey = "ttlInSeconds"
+	// TTLMetadataKey defines the metadata key for setting a time to live (as a Go duration or number of seconds).
+	TTLMetadataKey          = "ttl"
+	TTLInSecondsMetadataKey = "ttlInSeconds"
 
 	// RawPayloadKey defines the metadata key for forcing raw payload in pubsub.
 	RawPayloadKey = "rawPayload"
@@ -51,26 +48,34 @@ const (
 
 // TryGetTTL tries to get the ttl as a time.Duration value for pubsub, binding and any other building block.
 func TryGetTTL(props map[string]string) (time.Duration, bool, error) {
-	if val, ok := props[TTLMetadataKey]; ok && val != "" {
+	val, _ := kitmd.GetMetadataProperty(props, TTLMetadataKey, TTLInSecondsMetadataKey)
+	if val == "" {
+		return 0, false, nil
+	}
+
+	// Try to parse as duration string first
+	duration, err := time.ParseDuration(val)
+	if err != nil {
+		// Failed to parse Duration string.
+		// Let's try Integer and assume the value is in seconds
 		valInt64, err := strconv.ParseInt(val, 10, 64)
 		if err != nil {
 			return 0, false, fmt.Errorf("%s value must be a valid integer: actual is '%s'", TTLMetadataKey, val)
 		}
-
 		if valInt64 <= 0 {
-			return 0, false, fmt.Errorf("%s value must be higher than zero: actual is %d", TTLMetadataKey, valInt64)
+			return 0, false, fmt.Errorf("%s value must be higher than zero: actual is '%d'", TTLMetadataKey, valInt64)
 		}
 
-		duration := time.Duration(valInt64) * time.Second
+		duration = time.Duration(valInt64) * time.Second
 		if duration < 0 {
 			// Overflow
 			duration = math.MaxInt64
 		}
-
-		return duration, true, nil
+	} else if duration < 0 {
+		duration = 0
 	}
 
-	return 0, false, nil
+	return duration, true, nil
 }
 
 // TryGetPriority tries to get the priority for binding and any other building block.
@@ -81,6 +86,7 @@ func TryGetPriority(props map[string]string) (uint8, bool, error) {
 			return 0, false, fmt.Errorf("%s value must be a valid integer: actual is '%s'", PriorityMetadataKey, val)
 		}
 
+		//nolint:gosec
 		priority := uint8(intVal)
 		if intVal < 0 {
 			priority = 0
@@ -139,205 +145,6 @@ func GetMetadataProperty(props map[string]string, keys ...string) (val string, o
 	return "", false
 }
 
-// DecodeMetadata decodes metadata into a struct
-// This is an extension of mitchellh/mapstructure which also supports decoding durations
-func DecodeMetadata(input any, result any) error {
-	// avoids a common mistake of passing the metadata struct, instead of the properties map
-	// if input is of type struct, cast it to metadata.Base and access the Properties instead
-	v := reflect.ValueOf(input)
-	if v.Kind() == reflect.Struct {
-		f := v.FieldByName("Properties")
-		if f.IsValid() && f.Kind() == reflect.Map {
-			input = f.Interface().(map[string]string)
-		}
-	}
-
-	inputMap, err := cast.ToStringMapStringE(input)
-	if err != nil {
-		return fmt.Errorf("input object cannot be cast to map[string]string: %w", err)
-	}
-
-	// Handle aliases
-	err = resolveAliases(inputMap, result)
-	if err != nil {
-		return fmt.Errorf("failed to resolve aliases: %w", err)
-	}
-
-	// Finally, decode the metadata using mapstructure
-	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
-		DecodeHook: mapstructure.ComposeDecodeHookFunc(
-			toTimeDurationArrayHookFunc(),
-			toTimeDurationHookFunc(),
-			toTruthyBoolHookFunc(),
-			toStringArrayHookFunc(),
-			toByteSizeHookFunc(),
-		),
-		Metadata:         nil,
-		Result:           result,
-		WeaklyTypedInput: true,
-	})
-	if err != nil {
-		return err
-	}
-	err = decoder.Decode(inputMap)
-	return err
-}
-
-func resolveAliases(md map[string]string, result any) error {
-	// Get the list of all keys in the map
-	keys := make(map[string]string, len(md))
-	for k := range md {
-		lk := strings.ToLower(k)
-
-		// Check if there are duplicate keys after lowercasing
-		_, ok := keys[lk]
-		if ok {
-			return fmt.Errorf("key %s is duplicate in the metadata", lk)
-		}
-
-		keys[lk] = k
-	}
-
-	// Error if result is not pointer to struct, or pointer to pointer to struct
-	t := reflect.TypeOf(result)
-	if t.Kind() != reflect.Pointer {
-		return fmt.Errorf("not a pointer: %s", t.Kind().String())
-	}
-	t = t.Elem()
-	if t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
-	if t.Kind() != reflect.Struct {
-		return fmt.Errorf("not a struct: %s", t.Kind().String())
-	}
-
-	// Iterate through all the properties of result to see if anyone has the "mapstructurealiases" property
-	for i := 0; i < t.NumField(); i++ {
-		currentField := t.Field(i)
-
-		// Ignored fields that are not exported or that don't have a "mapstructure" tag
-		mapstructureTag := currentField.Tag.Get("mapstructure")
-		if !currentField.IsExported() || mapstructureTag == "" {
-			continue
-		}
-
-		// If the current property has a value in the metadata, then we don't need to handle aliases
-		_, ok := keys[strings.ToLower(mapstructureTag)]
-		if ok {
-			continue
-		}
-
-		// Check if there's a "mapstructurealiases" tag
-		aliasesTag := strings.ToLower(currentField.Tag.Get("mapstructurealiases"))
-		if aliasesTag == "" {
-			continue
-		}
-
-		// Look for the first alias that has a value
-		var mdKey string
-		for _, alias := range strings.Split(aliasesTag, ",") {
-			mdKey, ok = keys[alias]
-			if !ok {
-				continue
-			}
-
-			// We found an alias
-			md[mapstructureTag] = md[mdKey]
-			break
-		}
-	}
-
-	return nil
-}
-
-func toTruthyBoolHookFunc() mapstructure.DecodeHookFunc {
-	stringType := reflect.TypeOf("")
-	boolType := reflect.TypeOf(true)
-	boolPtrType := reflect.TypeOf(ptr.Of(true))
-
-	return func(
-		f reflect.Type,
-		t reflect.Type,
-		data any,
-	) (any, error) {
-		if f == stringType && t == boolType {
-			return utils.IsTruthy(data.(string)), nil
-		}
-		if f == stringType && t == boolPtrType {
-			return ptr.Of(utils.IsTruthy(data.(string))), nil
-		}
-		return data, nil
-	}
-}
-
-func toStringArrayHookFunc() mapstructure.DecodeHookFunc {
-	stringType := reflect.TypeOf("")
-	stringSliceType := reflect.TypeOf([]string{})
-	stringSlicePtrType := reflect.TypeOf(ptr.Of([]string{}))
-
-	return func(
-		f reflect.Type,
-		t reflect.Type,
-		data any,
-	) (any, error) {
-		if f == stringType && t == stringSliceType {
-			return strings.Split(data.(string), ","), nil
-		}
-		if f == stringType && t == stringSlicePtrType {
-			return ptr.Of(strings.Split(data.(string), ",")), nil
-		}
-		return data, nil
-	}
-}
-
-func toTimeDurationArrayHookFunc() mapstructure.DecodeHookFunc {
-	convert := func(input string) ([]time.Duration, error) {
-		parts := strings.Split(input, ",")
-		res := make([]time.Duration, 0, len(parts))
-		for _, v := range parts {
-			input := strings.TrimSpace(v)
-			if input == "" {
-				continue
-			}
-			val, err := time.ParseDuration(input)
-			if err != nil {
-				// If we can't parse the duration, try parsing it as int64 seconds
-				seconds, errParse := strconv.ParseInt(input, 10, 0)
-				if errParse != nil {
-					return nil, errors.Join(err, errParse)
-				}
-				val = time.Duration(seconds * int64(time.Second))
-			}
-			res = append(res, val)
-		}
-		return res, nil
-	}
-
-	stringType := reflect.TypeOf("")
-	durationSliceType := reflect.TypeOf([]time.Duration{})
-	durationSlicePtrType := reflect.TypeOf(ptr.Of([]time.Duration{}))
-
-	return func(
-		f reflect.Type,
-		t reflect.Type,
-		data any,
-	) (any, error) {
-		if f == stringType && t == durationSliceType {
-			inputArrayString := data.(string)
-			return convert(inputArrayString)
-		}
-		if f == stringType && t == durationSlicePtrType {
-			inputArrayString := data.(string)
-			res, err := convert(inputArrayString)
-			if err != nil {
-				return nil, err
-			}
-			return ptr.Of(res), nil
-		}
-		return data, nil
-	}
-}
-
 type ComponentType string
 
 const (
@@ -351,6 +158,7 @@ const (
 	CryptoType             ComponentType = "crypto"
 	NameResolutionType     ComponentType = "nameresolution"
 	WorkflowType           ComponentType = "workflows"
+	ConversationType       ComponentType = "conversation"
 )
 
 // IsValid returns true if the component type is valid.
@@ -413,7 +221,7 @@ func GetMetadataInfoFromStructType(t reflect.Type, metadataMap *MetadataMap, com
 		*metadataMap = MetadataMap{}
 	}
 
-	for i := 0; i < t.NumField(); i++ {
+	for i := range t.NumField() {
 		currentField := t.Field(i)
 		// fields that are not exported cannot be set via the mapstructure metadata decoding mechanism
 		if !currentField.IsExported() {

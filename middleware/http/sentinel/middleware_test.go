@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/dapr/components-contrib/metadata"
 	"github.com/dapr/components-contrib/middleware"
@@ -50,12 +51,12 @@ func TestRequestHandlerWithFlowRules(t *testing.T) {
 	log := logger.NewLogger("sentinel.test")
 	sentinel := NewMiddleware(log)
 	handler, err := sentinel.GetHandler(context.Background(), meta)
-	assert.Nil(t, err)
+	require.NoError(t, err)
 
 	r := httptest.NewRequest(http.MethodGet, "http://localhost:5001/v1.0/nodeapp/healthz", nil)
 
 	counter := &counter{}
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		w := httptest.NewRecorder()
 		handler(http.HandlerFunc(counter.handle)).ServeHTTP(w, r)
 	}
@@ -129,9 +130,9 @@ func TestLoadRules(t *testing.T) {
 			sentinel, _ := NewMiddleware(nil).(*Middleware)
 			err := sentinel.loadSentinelRules(&c.meta)
 			if c.expectErr {
-				assert.NotNil(t, err)
+				require.Error(t, err)
 			} else {
-				assert.Nil(t, err)
+				require.NoError(t, err)
 			}
 		})
 	}
