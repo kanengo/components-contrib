@@ -120,8 +120,14 @@ func (r *redisStreams) Publish(ctx context.Context, req *pubsub.PublishRequest) 
 	return nil
 }
 
-func (r *redisStreams) CreateConsumerGroup(ctx context.Context, stream string) error {
-	err := r.client.XGroupCreateMkStream(ctx, stream, r.clientSettings.ConsumerID, "0")
+func (r *redisStreams) CreateConsumerGroup(ctx context.Context, stream string, md map[string]string) error {
+	customConsumerID := r.clientSettings.ConsumerID
+	if md != nil {
+		if cID, ok := md[consumerID]; ok {
+			customConsumerID = cID
+		}
+	}
+	err := r.client.XGroupCreateMkStream(ctx, stream, customConsumerID, "$")
 	// Ignore BUSYGROUP errors
 	if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
 		r.logger.Errorf("redis streams: %s", err)
@@ -135,7 +141,7 @@ func (r *redisStreams) Subscribe(ctx context.Context, req pubsub.SubscribeReques
 		return errors.New("component is closed")
 	}
 
-	if err := r.CreateConsumerGroup(ctx, req.Topic); err != nil {
+	if err := r.CreateConsumerGroup(ctx, req.Topic, req.Metadata); err != nil {
 		return err
 	}
 
@@ -153,7 +159,7 @@ func (r *redisStreams) Subscribe(ctx context.Context, req pubsub.SubscribeReques
 	}()
 	go func() {
 		defer r.wg.Done()
-		r.pollNewMessagesLoop(loopCtx, req.Topic, handler)
+		r.pollNewMessagesLoop(loopCtx, req.Topic, handler, req.Metadata)
 	}()
 	go func() {
 		defer r.wg.Done()
@@ -260,7 +266,7 @@ func (r *redisStreams) processMessage(msg redisMessageWrapper) error {
 
 // pollMessagesLoop calls `XReadGroup` for new messages and funnels them to the message channel
 // by calling `enqueueMessages`.
-func (r *redisStreams) pollNewMessagesLoop(ctx context.Context, stream string, handler pubsub.Handler) {
+func (r *redisStreams) pollNewMessagesLoop(ctx context.Context, stream string, handler pubsub.Handler, md map[string]string) {
 	for {
 		// Return on cancelation
 		if ctx.Err() != nil {
@@ -275,7 +281,7 @@ func (r *redisStreams) pollNewMessagesLoop(ctx context.Context, stream string, h
 				if strings.Contains(err.Error(), "NOGROUP") {
 					r.logger.Warnf("redis streams: consumer group %s does not exist for stream %s. This could mean the server experienced data loss, or the group/stream was deleted.", r.clientSettings.ConsumerID, stream)
 					r.logger.Warnf("redis streams: recreating group %s for stream %s", r.clientSettings.ConsumerID, stream)
-					r.CreateConsumerGroup(ctx, stream)
+					r.CreateConsumerGroup(ctx, stream, md)
 				}
 				r.logger.Errorf("redis streams: error reading from stream %s: %s", stream, err)
 			}

@@ -24,14 +24,12 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/cenkalti/backoff/v4"
-	"github.com/lestrrat-go/jwx/v2/jwt"
-	"golang.org/x/mod/semver"
-
 	"github.com/dapr/components-contrib/common/authentication/azure"
 	"github.com/dapr/components-contrib/configuration"
 	"github.com/dapr/components-contrib/metadata"
 	kitlogger "github.com/dapr/kit/logger"
 	kitretry "github.com/dapr/kit/retry"
+	"github.com/lestrrat-go/jwx/v2/jwt"
 )
 
 const (
@@ -175,37 +173,37 @@ func ParseClientFromProperties(properties map[string]string, componentType metad
 	}
 
 	var c RedisClient
-	newClientFunc := newV8Client
+	newClientFunc := newV9Client
 	if settings.Failover {
-		newClientFunc = newV8FailoverClient
+		newClientFunc = newV9FailoverClient
 	}
 
-	c, err = newClientFunc(&settings)
-	if err != nil {
-		return nil, nil, fmt.Errorf("redis client configuration error: %w", err)
-	}
-
-	version, err := GetServerVersion(c)
-	closeErr := c.Close() // close the client to avoid leaking connections
-	if closeErr != nil {
-		return nil, nil, closeErr
-	}
-
-	useNewClient := false
-	if err != nil {
-		// we couldn't query the server version, so we will assume the v8 client is not supported
-		useNewClient = true
-	} else if semver.Compare("v"+version, "v7.0.0") > -1 {
-		// if the server version is >= 7, we will use the v9 client
-		useNewClient = true
-	}
-
-	if useNewClient {
-		newClientFunc = newV9Client
-		if settings.Failover {
-			newClientFunc = newV9FailoverClient
-		}
-	}
+	//c, err = newClientFunc(&settings)
+	//if err != nil {
+	//	return nil, nil, fmt.Errorf("redis client configuration error: %w", err)
+	//}
+	//
+	//version, err := GetServerVersion(c)
+	//closeErr := c.Close() // close the client to avoid leaking connections
+	//if closeErr != nil {
+	//	return nil, nil, closeErr
+	//}
+	//
+	//useNewClient := false
+	//if err != nil {
+	//	// we couldn't query the server version, so we will assume the v8 client is not supported
+	//	useNewClient = true
+	//} else if semver.Compare("v"+version, "v7.0.0") > -1 {
+	//	// if the server version is >= 7, we will use the v9 client
+	//	useNewClient = true
+	//}
+	//
+	//if useNewClient {
+	//	newClientFunc = newV9Client
+	//	if settings.Failover {
+	//		newClientFunc = newV9FailoverClient
+	//	}
+	//}
 	c, err = newClientFunc(&settings)
 	if err != nil {
 		return nil, nil, fmt.Errorf("redis client configuration error: %w", err)
